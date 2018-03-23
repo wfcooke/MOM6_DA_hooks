@@ -92,7 +92,7 @@ module oda_types_mod
      !real, dimension(:), pointer :: ms_s ! ms salinity by level
      real, dimension(:), pointer :: ms_inv => NULL()
      real, dimension(:), pointer :: ms => NULL()
-     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
+!     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
      integer         :: yyyy
      integer         :: mmdd
