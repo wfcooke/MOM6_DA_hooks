@@ -216,7 +216,7 @@ end type MOM_control_struct
   call MOM_thermo_chksum(mesg,CS%tv,Grid)
 ! Close PF for this member
   call close_param_file(PF)
-  call set_current_pelist()
+!  call set_current_pelist()
   call get_time(Time,sec,days)
   call init_oda(Time, Grid, CS%GV, odaCS )
   call set_analysis_time(Time,odaCS) !< Set analysis time
@@ -225,8 +225,8 @@ end type MOM_control_struct
   call save_obs_diff('first_guess_profiles.nc' , odaCS)
   call get_posterior_tracer(Time, odaCS, Grid, GV, h, tv, increment=get_increment)
   !print *,'00001x',ens_pelist(ensemble_id,:)
-  call set_current_pelist(ens_pelist(ensemble_id,:))
-  call set_root_pe(ens_pelist(ensemble_id,1))
+!  call set_current_pelist(ens_pelist(ensemble_id,:))
+!  call set_root_pe(ens_pelist(ensemble_id,1))
   write(mesg,*) 'Posterior thermo state for ensemble member after remapping back to model domain', ensemble_id
   call MOM_thermo_chksum(mesg,tv,Grid)
   call diag_manager_end(Time) ! close diag_manager
