@@ -53,15 +53,15 @@ contains
   end subroutine open_profile_dataset
 
   ! get profiles obs relevant to current analysis interval
-  subroutine get_profiles(model_time, Profiles, Current_profiles, nprof)
+  subroutine get_profiles(model_time, Profiles, Current_profiles)
     type(time_type), intent(in) :: model_time
     type(ocean_profile_type), pointer :: Profiles
     type(ocean_profile_type), pointer :: Current_profiles
-    integer, intent(inout) :: nprof
+
 
     Profiles=>NULL()
     Current_Profiles=>NULL()
-    nprof=0
+
 
     return
   end subroutine get_profiles
