@@ -1,14 +1,4 @@
 module oda_types_mod
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!
-! This module contains a set of data structures and interfaces for compiling the MOM6 DA
-! driver code. This code is not yet finalized and will be replaced by supported
-! software at some later date.
-!
-! 3/22/18
-! matthew.harrison@noaa.gov
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #ifndef MAX_LEVS_FILE_
 #define MAX_LEVS_FILE_ 50
 #endif
@@ -22,10 +12,10 @@ module oda_types_mod
 ! for oda modules.
 !============================================================
 
-! Contact: Matthew.Harrison@noaa.gov and Feiyu.Lu@noaa.gov
+! Contact: Matthew.Harrison@noaa.gov and Feiyu.Lu@noaa.goy
 
   use time_manager_mod, only : time_type
-  !use obs_tools_mod, only : obs_def_type
+  use obs_tools_mod, only : obs_def_type
   !use mpp_domains_mod, only : domain2d
 
   implicit none
@@ -92,7 +82,7 @@ module oda_types_mod
      !real, dimension(:), pointer :: ms_s ! ms salinity by level
      real, dimension(:), pointer :: ms_inv => NULL()
      real, dimension(:), pointer :: ms => NULL()
-!     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
+     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
      integer         :: yyyy
      integer         :: mmdd
