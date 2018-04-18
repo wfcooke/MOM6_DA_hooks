@@ -73,6 +73,8 @@ module oda_types_mod
      real, dimension(:), pointer :: depth
      real, dimension(:), pointer :: data_t => NULL(), data_s => NULL()
      real, dimension(:), pointer :: data
+     real, dimension(:), pointer :: forecast => NULL()
+     real, dimension(:), pointer :: analysis => NULL()
      !integer, dimension(:), pointer :: flag_t
      !integer, dimension(:), pointer :: flag_s ! level-by-level flags for salinity
      !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.

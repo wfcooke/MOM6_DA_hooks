@@ -32,7 +32,7 @@ module oda_core_mod
 
   implicit none
   private
-  public :: oda_core_init, open_profile_dataset
+  public :: oda_core_init
   public :: get_profiles
 
   ! Parameters
@@ -49,7 +49,8 @@ module oda_core_mod
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
   real :: obs_sbound = -87.0 !< set obs domain
   real :: obs_nbound = 87.0 !< set obs domain
-  integer :: data_window = 15, obs_days_plus, obs_days_minus
+  real :: data_window = 1.0
+  integer :: obs_days_plus, obs_days_minus
   logical :: temp_obs, salt_obs
   integer :: max_files = 30
   namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, &
@@ -70,6 +71,7 @@ contains
     end type obs_entry_type
 
     type(time_type)  :: time_s, time_e
+    integer :: data_seconds
     integer :: i, j, n, obs_variable, ni, nj
     integer :: ioun, io_status, ierr
     integer :: stdout_unit, stdlog_unit
@@ -119,7 +121,8 @@ contains
 
     ! time window for DROP, MOORING and SATELLITE data respectively
     ! will be available from namelist
-    time_window(:) = set_time(0,data_window)
+    data_seconds = data_window * 24 * 3600
+    time_window(:) = set_time(data_seconds,0)
 
     nfiles = 0
     nrecs=0
@@ -869,7 +872,7 @@ contains
       endif
     end do
 
-    print *, "PE No.", mpp_pe(), ", current profiles: ", nprof
+    !print *, "PE No.", mpp_pe(), ", current profiles: ", nprof
 
     return
   end subroutine get_profiles
