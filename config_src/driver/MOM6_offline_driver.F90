@@ -223,7 +223,7 @@ end type MOM_control_struct
   call set_prior_tracer(Time, Grid, CS%GV, CS%h, CS%tv, odaCS)
   call oda(Time,odaCS) !<read observations and calculate ensemble increments or posterior
   call save_obs_diff('first_guess_profiles.nc' , odaCS)
-  call get_posterior_tracer(Time, odaCS, Grid, GV, h, tv, increment=get_increment)
+  call get_posterior_tracer(Time, odaCS, h, tv, increment=get_increment)
   !print *,'00001x',ens_pelist(ensemble_id,:)
 !  call set_current_pelist(ens_pelist(ensemble_id,:))
 !  call set_root_pe(ens_pelist(ensemble_id,1))
