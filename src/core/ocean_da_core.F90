@@ -19,12 +19,12 @@ module ocean_da_core_mod
 
   implicit none
   private
-  public :: oda_core_init, open_profile_dataset
+  public :: ocean_da_core_init, open_profile_dataset
   public :: get_profiles, copy_profiles
 
 contains
 
-  subroutine oda_core_init(Domain, T_grid, Profiles, model_time)
+  subroutine ocean_da_core_init(Domain, T_grid, Profiles, model_time)
     type(domain2d), pointer, intent(in) :: Domain
     type(grid_type), pointer, intent(in) :: T_grid
     type(ocean_profile_type), pointer :: Profiles
@@ -32,7 +32,7 @@ contains
 
     Profiles=>NULL()
     return
-  end subroutine oda_core_init
+  end subroutine ocean_da_core_init
 
   subroutine open_profile_dataset(Profiles, Domain, T_grid, &
                   filename, time_start, time_end, obs_variable, localize)
