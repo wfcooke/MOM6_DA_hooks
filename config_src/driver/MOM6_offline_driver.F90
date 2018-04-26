@@ -34,7 +34,7 @@ PROGRAM MOM6_ODA_offline_driver
   use MOM_open_boundary, only         : ocean_OBC_type
   use MOM_checksum_packages, only : MOM_state_chksum, MOM_thermo_chksum, MOM_state_stats
   use time_manager_mod, only: time_type, set_time, set_date, JULIAN, NOLEAP, NO_CALENDAR, set_calendar_type
-  use time_manager_mod, only: time_manager_init, get_time
+  use time_manager_mod, only: time_manager_init, get_time, set_time, operator(+)
   use ensemble_manager_mod, only : get_ensemble_size, ensemble_manager_init, ensemble_pelist_setup
   use ensemble_manager_mod, only : get_ensemble_id, get_ensemble_pelist
   use mpp_mod, only : set_current_pelist => mpp_set_current_pelist
@@ -45,7 +45,7 @@ PROGRAM MOM6_ODA_offline_driver
   use diag_manager_mod, only : diag_manager_init, diag_manager_end, get_base_date
   use MOM_oda_driver_mod, only : ODA_CS, oda, init_oda, oda_end
   use MOM_oda_driver_mod, only : set_prior_tracer, set_analysis_time, get_posterior_tracer, save_obs_diff
-  use oda_types_mod, only : ocean_profile_type
+  use ocean_da_types_mod, only : ocean_profile_type
   implicit none
 
 #include <MOM_memory.h>
@@ -104,10 +104,11 @@ end type MOM_control_struct
   integer :: ierr, io_status, n, nz, unit, i
   integer :: X_FLAGS, Y_FLAGS
   integer :: profile_fid
+  integer :: dt_model !< model timestep in seconds
   character(len=128) :: mesg
   !logical, dimension(:), pointer :: ens_pe(:)=>NULL() !< True if current PE is associated with ensemble member(n)
 
-  namelist /test_driver_nml/ date_init, date, calendar, get_increment
+  namelist /test_driver_nml/ date_init, date, calendar, get_increment, dt_model
 
   call MOM_infra_init()
   call io_infra_init()
@@ -116,6 +117,7 @@ end type MOM_control_struct
 ! Read namelist
   date(:)=0
   calendar_type=-1
+  dt_model=3600
   call open_file(unit,'input.nml',form=ASCII_FILE,action=READONLY_FILE)
   read(unit,test_driver_nml,iostat=io_status)
   call close_file(unit)
@@ -216,20 +218,16 @@ end type MOM_control_struct
   call MOM_thermo_chksum(mesg,CS%tv,Grid)
 ! Close PF for this member
   call close_param_file(PF)
-!  call set_current_pelist()
-  call get_time(Time,sec,days)
   call init_oda(Time, Grid, CS%GV, odaCS )
-  call set_analysis_time(Time,odaCS) !< Set analysis time
+  Time=Time+set_time(dt_model) !< increment the model time by 1 day
   call set_prior_tracer(Time, Grid, CS%GV, CS%h, CS%tv, odaCS)
   call oda(Time,odaCS) !<read observations and calculate ensemble increments or posterior
   call save_obs_diff('first_guess_profiles.nc' , odaCS)
   call get_posterior_tracer(Time, odaCS, h, tv, increment=get_increment)
-  !print *,'00001x',ens_pelist(ensemble_id,:)
-!  call set_current_pelist(ens_pelist(ensemble_id,:))
-!  call set_root_pe(ens_pelist(ensemble_id,1))
   write(mesg,*) 'Posterior thermo state for ensemble member after remapping back to model domain', ensemble_id
-  call MOM_thermo_chksum(mesg,tv,Grid)
+  call MOM_thermo_chksum(mesg,CS%tv,Grid)
   call diag_manager_end(Time) ! close diag_manager
+  call set_analysis_time(Time,odaCS) !< Increment analysis time
   deallocate(odaCS)
   deallocate(tv,atm_pelist,lnd_pelist,ice_pelist,ens_pelist)
 
