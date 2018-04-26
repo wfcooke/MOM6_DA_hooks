@@ -1,4 +1,4 @@
-module oda_types_mod
+module ocean_da_types_mod
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
 ! This module contains a set of data structures and interfaces for compiling the MOM6 DA
@@ -120,4 +120,4 @@ module oda_types_mod
      integer :: ni, nj, nk
   end type grid_type
 
-end module oda_types_mod
+end module ocean_da_types_mod
