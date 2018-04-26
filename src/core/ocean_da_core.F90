@@ -8,13 +8,13 @@
 ! matthew.harrison@noaa.gov
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-module oda_core_mod
+module ocean_da_core_mod
 
 
   use mpp_domains_mod, only : domain2d
   use time_manager_mod, only : time_type, set_time, get_date
   ! ODA_tools modules
-  use oda_types_mod, only : ocean_profile_type, grid_type
+  use ocean_da_types_mod, only : ocean_profile_type, grid_type
 
 
   implicit none
@@ -83,4 +83,4 @@ contains
     return
   end subroutine copy_obs
 
-end module oda_core_mod
+end module ocean_da_core_mod
