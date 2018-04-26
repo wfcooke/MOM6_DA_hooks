@@ -15,7 +15,7 @@ module write_ocean_obs_mod
       MPP_OVERWR, MPP_NETCDF, MPP_MULTI, MPP_SINGLE,&
       mpp_write_meta, mpp_write, mpp_close
  use mpp_mod, only : mpp_error, FATAL
- use oda_types_mod, only : ocean_profile_type
+ use ocean_da_types_mod, only : ocean_profile_type
  use time_manager_mod, only : time_type, get_time, set_date, operator ( - )
 
  implicit none
