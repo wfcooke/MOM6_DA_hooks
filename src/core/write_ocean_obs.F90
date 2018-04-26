@@ -1,4 +1,4 @@
-module write_ocean_data_mod
+module write_ocean_obs_mod
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !
@@ -23,7 +23,7 @@ module write_ocean_data_mod
  private
 
  public :: open_profile_file, write_profile, close_profile_file, &
-      write_ocean_data_init
+      write_ocean_obs_init
 
 #include <netcdf.inc>
 
@@ -58,12 +58,12 @@ subroutine close_profile_file(unit)
   return
 end subroutine close_profile_file
 
-subroutine write_ocean_data_init()
+subroutine write_ocean_obs_init()
 
   return
 
-end subroutine write_ocean_data_init
+end subroutine write_ocean_obs_init
 
-end module write_ocean_data_mod
+end module write_ocean_obs_mod
 
 
