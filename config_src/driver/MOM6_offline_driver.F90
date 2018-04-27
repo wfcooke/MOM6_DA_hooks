@@ -223,7 +223,7 @@ end type MOM_control_struct
   call set_prior_tracer(Time, Grid, CS%GV, CS%h, CS%tv, odaCS)
   call oda(Time,odaCS) !<read observations and calculate ensemble increments or posterior
   call save_obs_diff('first_guess_profiles.nc' , odaCS)
-  call get_posterior_tracer(Time, odaCS, h, tv, increment=get_increment)
+  call get_posterior_tracer(Time, odaCS, Grid, CS%GV, h, tv, increment=get_increment)
   write(mesg,*) 'Posterior thermo state for ensemble member after remapping back to model domain', ensemble_id
   call MOM_thermo_chksum(mesg,CS%tv,Grid)
   call diag_manager_end(Time) ! close diag_manager

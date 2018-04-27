@@ -9,6 +9,7 @@ module ocean_da_types_mod
 ! matthew.harrison@noaa.gov
 !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 #ifndef MAX_LEVS_FILE_
 #define MAX_LEVS_FILE_ 50
 #endif
@@ -22,10 +23,10 @@ module ocean_da_types_mod
 ! for oda modules.
 !============================================================
 
-! Contact: Matthew.Harrison@noaa.gov and Feiyu.Lu@noaa.gov
+! Contact: Matthew.Harrison@noaa.gov and Feiyu.Lu@noaa.goy
 
   use time_manager_mod, only : time_type
-  !use obs_tools_mod, only : obs_def_type
+  use obs_tools_mod, only : obs_def_type
   !use mpp_domains_mod, only : domain2d
 
   implicit none
@@ -82,7 +83,9 @@ module ocean_da_types_mod
      real :: nbr_dist ! distance to nearest neighbor model gridpoint
      real, dimension(:), pointer :: depth
      real, dimension(:), pointer :: data_t => NULL(), data_s => NULL()
-     real, dimension(:), pointer :: data
+     real, dimension(:), pointer :: data => NULL()
+     real, dimension(:), pointer :: forecast => NULL()
+     real, dimension(:), pointer :: analysis => NULL()
      !integer, dimension(:), pointer :: flag_t
      !integer, dimension(:), pointer :: flag_s ! level-by-level flags for salinity
      !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.
@@ -92,7 +95,7 @@ module ocean_da_types_mod
      !real, dimension(:), pointer :: ms_s ! ms salinity by level
      real, dimension(:), pointer :: ms_inv => NULL()
      real, dimension(:), pointer :: ms => NULL()
-!     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
+     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
      integer         :: yyyy
      integer         :: mmdd
