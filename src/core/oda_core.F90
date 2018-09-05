@@ -271,6 +271,7 @@ contains
     call mpp_get_compute_domain(Domain, isc, iec, jsc, jec)
     call mpp_get_data_domain(Domain, isd, ied, jsd, jed)
     call mpp_get_global_domain(Domain, isg, ieg, jsg, jeg)
+    !print *, "pe=",mpp_pe(),';isd,ied,jsd,jed=',isd,ied,jsd,jed
     lon_len = ied-isd+1
     blk = (jed-jsd+1)*lon_len
     stdout_unit = stdout()
@@ -287,6 +288,11 @@ contains
 
     if ( mpp_pe() .eq. mpp_root_pe() ) then
        write (UNIT=stdout_unit, FMT='("Opened profile dataset: ",A)') trim(filename)
+    end if
+    if (nstation .EQ. 0) then
+      write(UNIT=stdout_unit, FMT='("There are ZERO records in this dataset.")')
+      call mpp_close(unit)
+      return
     end if
 
     ! get axis information
@@ -606,6 +612,7 @@ contains
 
        if ( var_id == TEMP_ID .and. flag_t /= 0.0 ) Prof%accepted = .false.
        if ( var_id == SALT_ID .and. flag_s /= 0.0 ) Prof%accepted = .false.
+       if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -871,6 +878,11 @@ contains
           Prof=>NULL()
       endif
     end do
+
+    if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) then
+            Current_profiles=>NULL()
+            write(UNIT=stdout_unit, FMT='("Skip day")')
+    endif
 
     !print *, "PE No.", mpp_pe(), ", current profiles: ", nprof
 
