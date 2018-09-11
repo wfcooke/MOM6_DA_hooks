@@ -29,6 +29,9 @@ module oda_types_mod
   integer, save, public :: TEMP_ID = 1
   integer, save, public :: SALT_ID = 2
   real, parameter, public :: MISSING_VALUE = -1.e10
+  integer, save, public :: ODA_PFL = 1
+  integer, save, public :: ODA_XBT = 2
+  integer, save, public :: ODA_MRB = 3
 
 !> Type for ocean state in DA space (same decomposition and vertical grid)
   type, public :: OCEAN_CONTROL_STRUCT
@@ -64,6 +67,8 @@ module oda_types_mod
      real :: lat, lon !< latitude and longitude (degrees E and N)
      logical :: accepted !< logical flag to disable a profile
      integer :: nlinks !< number of links used to construct the profile (when reading from disk)
+     type(time_type) :: time_window
+     real :: obs_error
      type(ocean_profile_type), pointer :: next=>NULL() !< all profiles are stored as linked list.
      type(ocean_profile_type), pointer :: prev=>NULL()
      type(ocean_profile_type), pointer :: cnext=>NULL() ! current profiles are stored as linked list.

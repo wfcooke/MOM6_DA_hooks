@@ -14,7 +14,7 @@ module oda_core_mod
   use mpp_domains_mod, only : domain2d, mpp_get_global_domain
   use time_manager_mod, only : time_type, set_time, get_date
   use time_manager_mod, only : decrement_time, increment_time
-  use time_manager_mod, only : operator( <= ), operator( >= )
+  use time_manager_mod, only : operator( <= ), operator( >= ), operator(*)
   use time_manager_mod, only : operator( - ), operator( > ), operator ( < )
   use get_cal_time_mod, only : get_cal_time
   use axis_utils_mod, only : frac_index
@@ -24,6 +24,7 @@ module oda_core_mod
   ! ODA_tools modules
   use oda_types_mod, only : ocean_profile_type, grid_type
   use oda_types_mod, only : TEMP_ID, SALT_ID, MISSING_VALUE
+  use oda_types_mod, only : ODA_PFL, ODA_XBT, ODA_MRB
   use oda_types_mod, only : UNKNOWN, MAX_LEVELS_FILE, MAX_LINKS
   use kdtree, only : kd_root, kd_search_nnearest, kd_init
   use loc_and_dist_mod, only : within_domain
@@ -39,7 +40,8 @@ module oda_core_mod
   integer, parameter :: PROFILE_FILE = 1
   integer, parameter :: SFC_FILE = 2
 ! time window for DROP, MOORING and SATELLITE data respectively
-  type(time_type) , dimension(0:10) :: time_window
+  type(time_type) , dimension(10) :: time_window
+  integer, dimension(10) :: type_count = 0
 
   integer, allocatable, dimension(:) :: lon1d, lat1d
   real, allocatable, dimension(:) :: glon1d, glat1d
@@ -49,12 +51,14 @@ module oda_core_mod
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
   real :: obs_sbound = -87.0 !< set obs domain
   real :: obs_nbound = 87.0 !< set obs domain
-  real :: data_window = 1.0
+  real, dimension(10) :: data_window = 24.0
+  real, dimension(10) :: temp_error = 1.0
+  real, dimension(10) :: salt_error = 1.0
   integer :: obs_days_plus, obs_days_minus
   logical :: temp_obs, salt_obs
   integer :: max_files = 30
   namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, &
-          data_window, temp_obs, salt_obs, max_files, &
+          data_window, temp_error, salt_error, temp_obs, salt_obs, max_files, &
           obs_days_minus, obs_days_plus
 
 contains
@@ -121,9 +125,13 @@ contains
 
     ! time window for DROP, MOORING and SATELLITE data respectively
     ! will be available from namelist
-    data_seconds = data_window * 24 * 3600
-    time_window(:) = set_time(data_seconds,0)
-
+    do i=1,10
+      data_seconds = data_window(i) * 3600
+      time_window(i) = set_time(data_seconds,0)
+      if( mpp_pe() == mpp_root_pe() ) print *, 'Obs type',i,',time window',data_window(i), &
+              'T err',temp_error(i),',S err',salt_error(i)
+    enddo
+    
     nfiles = 0
     nrecs=0
     call mpp_open(unit, 'ocean_obs_table', action=MPP_RDONLY)
@@ -194,6 +202,8 @@ contains
        end do
     end if
 
+    print *, "PE No.", mpp_pe(), ",types", type_count
+
     ! Deallocate before exiting routine
     deallocate(kdroot)
     deallocate(lon1d, lat1d, glat1d, glon1d)
@@ -220,6 +230,8 @@ contains
     real, dimension(MAX_LEVELS_FILE) :: depth, data, t_flag, s_flag
     real, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: data_bfr, depth_bfr, t_flag_bfr, s_flag_bfr
     type(ocean_profile_type), pointer :: Prof
+    type(time_type) :: window
+    real :: t_err, s_err
 
     integer :: unit, ndim, nvar, natt, nstation, max_profiles
     integer :: stdout_unit
@@ -245,7 +257,7 @@ contains
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
     integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
-    integer :: profile_count
+    integer :: profile_count = 0
     type(horiz_interp_type) :: Interp
     real :: lon_out(1, 1), lat_out(1, 1)
     real :: lat_bound = 59.0
@@ -253,8 +265,6 @@ contains
     real :: dist(1), frac_lon, frac_lat, frac_k
     real, dimension(6) :: coef
     integer, dimension(8) :: state_index
-
-    profile_count = 0
 
     Prof=>Profiles
     do while (associated(Prof%next))
@@ -282,6 +292,19 @@ contains
     else if ( obs_variable == SALT_ID ) then
        var_id = SALT_ID
     end if
+
+    select case ( trim(filename(13:15)) )
+      case ('PFL')
+        inst_type = ODA_PFL
+      case ('XBT')
+        inst_type = ODA_XBT
+      case ('MRB')
+        inst_type = ODA_MRB
+      case default
+    end select
+    t_err = temp_error(inst_type)
+    s_err = salt_error(inst_type)
+    window = time_window(inst_type)
 
     call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
     call mpp_get_info(unit, ndim, nvar, natt, nstation)
@@ -386,8 +409,6 @@ contains
          call mpp_read(unit, field_flag_s, flag_s, tindex=station_count)
        end if
 
-       inst_type = 1 ! snz change one line
-
        data_is_local = .false.
        data_in_period = .false.
 
@@ -424,6 +445,7 @@ contains
        end if
 
        profile_count = profile_count + 1
+       type_count(inst_type) = type_count(inst_type)+1
 
        call mpp_read(unit, field_depth, depth(1:nlevs), tindex=station_count)
        call mpp_read(unit, field_fix_depth, fix_depth, tindex=station_count) ! snz drop rate
@@ -531,6 +553,12 @@ contains
        Prof%levels = num_levs
        Prof%lat = lat; Prof%lon = lon
        Prof%nbr_xi = lon1d(inds(1)); Prof%nbr_yi = lat1d(inds(1))
+       Prof%time_window = window
+       if ( var_id == TEMP_ID ) then
+          Prof%obs_error = t_err
+       else if ( var_id == SALT_ID ) then
+          Prof%obs_error = s_err
+       end if
        kk = 1
        do k=1, MAX_LEVELS_FILE
           if ( flag(k) ) then
@@ -822,8 +850,6 @@ contains
        Prof=>Prof%next
     end do
 
-    !print *, "PE No.", mpp_pe(), ", local profiles: ", profile_count
-
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_profile_dataset
@@ -861,7 +887,7 @@ contains
        end if
        ! no tdiff criteria for monthly mean data like
        ! but tdiff criteria has to be set for daily data
-       if ( tdiff <= time_window(Prof%inst_type) .and. Prof%accepted ) then
+       if ( tdiff <= 2*Prof%time_window .and. Prof%accepted ) then
           nprof = nprof + 1
           Prof%tdiff = tdiff
           if (.not.associated(Current_profiles)) then
@@ -879,12 +905,10 @@ contains
       endif
     end do
 
-    if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) then
-            Current_profiles=>NULL()
-            write(UNIT=stdout_unit, FMT='("Skip day")')
-    endif
-
-    !print *, "PE No.", mpp_pe(), ", current profiles: ", nprof
+    !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) then
+            !Current_profiles=>NULL()
+            !write(UNIT=stdout_unit, FMT='("Skip day")')
+    !endif
 
     return
   end subroutine get_profiles
