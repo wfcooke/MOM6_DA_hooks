@@ -69,6 +69,9 @@ module oda_types_mod
      integer :: nlinks !< number of links used to construct the profile (when reading from disk)
      type(time_type) :: time_window
      real :: obs_error
+     integer :: impact_levels
+     real :: loc_dist
+     logical :: temp_to_salt, salt_to_temp
      type(ocean_profile_type), pointer :: next=>NULL() !< all profiles are stored as linked list.
      type(ocean_profile_type), pointer :: prev=>NULL()
      type(ocean_profile_type), pointer :: cnext=>NULL() ! current profiles are stored as linked list.
@@ -76,25 +79,12 @@ module oda_types_mod
      integer :: nbr_xi, nbr_yi ! nearest neighbor model gridpoint for the profile
      real :: nbr_dist ! distance to nearest neighbor model gridpoint
      real, dimension(:), pointer :: depth
-     real, dimension(:), pointer :: data_t => NULL(), data_s => NULL()
      real, dimension(:), pointer :: data
      real, dimension(:), pointer :: forecast => NULL()
      real, dimension(:), pointer :: analysis => NULL()
-     !integer, dimension(:), pointer :: flag_t
-     !integer, dimension(:), pointer :: flag_s ! level-by-level flags for salinity
-     !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.
      logical, dimension(:), pointer :: flag
-     real    :: temp_err, salt_err ! measurement error
-     !real, dimension(:), pointer :: ms_t ! ms temperature by level
-     !real, dimension(:), pointer :: ms_s ! ms salinity by level
-     real, dimension(:), pointer :: ms_inv => NULL()
-     real, dimension(:), pointer :: ms => NULL()
      type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
-     integer         :: yyyy
-     integer         :: mmdd
-     !type(time_type), pointer :: Model_time ! each profile can be associated with a first-guess field with an associated time and grid
-     !type(grid_type), pointer :: Model_grid
      real :: i_index, j_index ! model longitude and latitude indices respectively
      real, dimension(:), pointer :: k_index ! model depth indices
      type(time_type) :: tdiff      ! positive difference between model time and observation time
@@ -104,16 +94,10 @@ module oda_types_mod
 ! lat, lon, depth, thickness, basin and land mask
   type, public :: grid_type
      real, pointer, dimension(:,:) :: x=>NULL(), y=>NULL()
-     !real, pointer, dimension(:,:) :: x_bound=>NULL(), y_bound=>NULL()
-     !real, pointer, dimension(:,:) :: dx=>NULL(), dy=>NULL()
      real, pointer, dimension(:,:,:) :: z=>NULL()
      real, pointer, dimension(:,:,:) :: h=>NULL()
-     !real, pointer, dimension(:) :: z_bound=>NULL()
-     !real, pointer, dimension(:) :: dz => NULL()
      real, pointer, dimension(:,:) :: basin_mask => NULL()
      real, pointer, dimension(:,:,:) :: mask => NULL()
-     !type(domain2d), pointer :: Dom ! FMS domain type
-     !logical :: cyclic
      integer :: ni, nj, nk
   end type grid_type
 

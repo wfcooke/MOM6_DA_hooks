@@ -113,8 +113,8 @@ function open_profile_file(name, nvar, grid_lon, grid_lat,thread,fset)
   write(time_units,'(a,i4.4,a,i2.2,a,i2.2,a)')  'days since ',ref_yr,'-',ref_mon,'-',ref_day,' 00:00:00'
   
   call mpp_write_meta(unit,time_field,(/station_axis/),'time',trim(time_units),'time')
-  call mpp_write_meta(unit,yyyy_field,(/station_axis/),'yyyy','none','yyyy')
-  call mpp_write_meta(unit,mmdd_field,(/station_axis/),'mmdd','none','mmdd')
+  !call mpp_write_meta(unit,yyyy_field,(/station_axis/),'yyyy','none','yyyy')
+  !call mpp_write_meta(unit,mmdd_field,(/station_axis/),'mmdd','none','mmdd')
   
   units='deg_C'
   call mpp_write_meta(unit,temp_err_field,(/station_axis/),&
@@ -279,12 +279,12 @@ subroutine write_profile(unit,profile)
   call mpp_write(unit,lon_field,profile%lon,station)
   call mpp_write(unit,lat_field,profile%lat,station)
   call mpp_write(unit,time_field,days_since,station)
-  tmp_s = real(profile%yyyy)
-  call mpp_write(unit,yyyy_field,tmp_s,station)
-  tmp_s = real(profile%mmdd)
-  call mpp_write(unit,mmdd_field,tmp_s,station)
-  call mpp_write(unit,temp_err_field,profile%temp_err,station)
-  call mpp_write(unit,salt_err_field,profile%salt_err,station)
+  !tmp_s = real(profile%yyyy)
+  !call mpp_write(unit,yyyy_field,tmp_s,station)
+  !tmp_s = real(profile%mmdd)
+  !call mpp_write(unit,mmdd_field,tmp_s,station)
+  !call mpp_write(unit,temp_err_field,profile%temp_err,station)
+  !call mpp_write(unit,salt_err_field,profile%salt_err,station)
   nlinks = 0
   if (profile%levels .gt. max_levels_file) then
       nlinks = ceiling(float(profile%levels)/float(max_levels_file)) - 1
@@ -348,12 +348,12 @@ subroutine write_profile(unit,profile)
      call mpp_write(unit,lon_field,profile%lon,station)
      call mpp_write(unit,lat_field,profile%lat,station)
      call mpp_write(unit,time_field,days_since,station)
-     tmp_s = real(profile%yyyy)
-     call mpp_write(unit,yyyy_field,tmp_s,station)
-     tmp_s = real(profile%mmdd)
-     call mpp_write(unit,mmdd_field,tmp_s,station)
-     call mpp_write(unit,temp_err_field,profile%temp_err,station)
-     call mpp_write(unit,salt_err_field,profile%salt_err,station)
+     !tmp_s = real(profile%yyyy)
+     !call mpp_write(unit,yyyy_field,tmp_s,station)
+     !tmp_s = real(profile%mmdd)
+     !call mpp_write(unit,mmdd_field,tmp_s,station)
+     !call mpp_write(unit,temp_err_field,profile%temp_err,station)
+     !call mpp_write(unit,salt_err_field,profile%salt_err,station)
   
      ! if (write_grid_info) then
      !     call mpp_write(unit, lon_index_field,profile%i_index)

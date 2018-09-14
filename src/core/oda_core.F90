@@ -51,15 +51,22 @@ module oda_core_mod
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
   real :: obs_sbound = -87.0 !< set obs domain
   real :: obs_nbound = 87.0 !< set obs domain
+  real :: depth_cut = 2000.0
   real, dimension(10) :: data_window = 24.0
   real, dimension(10) :: temp_error = 1.0
   real, dimension(10) :: salt_error = 1.0
+  integer, dimension(10) :: impact_levels = 3
+  real, dimension(10) :: temp_dist = 500.0e3
+  real, dimension(10) :: salt_dist = 500.0e3
+  logical, dimension(10) :: temp_to_salt = .false.
+  logical, dimension(10) :: salt_to_temp = .false.
   integer :: obs_days_plus, obs_days_minus
   logical :: temp_obs, salt_obs
   integer :: max_files = 30
-  namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, &
-          data_window, temp_error, salt_error, temp_obs, salt_obs, max_files, &
-          obs_days_minus, obs_days_plus
+  namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, depth_cut, &
+          data_window, temp_error, salt_error, impact_levels, temp_dist, salt_dist, &
+          temp_to_salt, salt_to_temp, &
+          temp_obs, salt_obs, max_files, obs_days_minus, obs_days_plus
 
 contains
 
@@ -128,8 +135,6 @@ contains
     do i=1,10
       data_seconds = data_window(i) * 3600
       time_window(i) = set_time(data_seconds,0)
-      if( mpp_pe() == mpp_root_pe() ) print *, 'Obs type',i,',time window',data_window(i), &
-              'T err',temp_error(i),',S err',salt_error(i)
     enddo
     
     nfiles = 0
@@ -230,14 +235,13 @@ contains
     real, dimension(MAX_LEVELS_FILE) :: depth, data, t_flag, s_flag
     real, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: data_bfr, depth_bfr, t_flag_bfr, s_flag_bfr
     type(ocean_profile_type), pointer :: Prof
-    type(time_type) :: window
-    real :: t_err, s_err
 
     integer :: unit, ndim, nvar, natt, nstation, max_profiles
     integer :: stdout_unit
     integer :: inst_type, var_id
     integer :: station_count, station_link
     integer :: num_levs, k, kk, i, j, i0, j0, k0, nlevs, a, nn, nlinks
+    integer :: yr, mon, day, hr, min, sec
     integer :: ii, jj
 
     logical :: data_is_local, localize_data, cont
@@ -281,17 +285,16 @@ contains
     call mpp_get_compute_domain(Domain, isc, iec, jsc, jec)
     call mpp_get_data_domain(Domain, isd, ied, jsd, jed)
     call mpp_get_global_domain(Domain, isg, ieg, jsg, jeg)
-    !print *, "pe=",mpp_pe(),';isd,ied,jsd,jed=',isd,ied,jsd,jed
+    if(obs_variable == TEMP_ID) then
+      select case ( trim(filename(13:21)) )
+        case ('PFL_pa2004')
+          print *, "pe=",mpp_pe(),isd,ied,jsd,jed
+        case default
+      end select
+    endif
     lon_len = ied-isd+1
     blk = (jed-jsd+1)*lon_len
     stdout_unit = stdout()
-
-    var_id=-1
-    if ( obs_variable == TEMP_ID ) then
-       var_id = TEMP_ID
-    else if ( obs_variable == SALT_ID ) then
-       var_id = SALT_ID
-    end if
 
     select case ( trim(filename(13:15)) )
       case ('PFL')
@@ -302,9 +305,11 @@ contains
         inst_type = ODA_MRB
       case default
     end select
-    t_err = temp_error(inst_type)
-    s_err = salt_error(inst_type)
-    window = time_window(inst_type)
+
+    var_id=-1
+    if ( obs_variable == TEMP_ID .or. obs_variable == SALT_ID) then
+       var_id = obs_variable
+    end if
 
     call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
     call mpp_get_info(unit, ndim, nvar, natt, nstation)
@@ -464,7 +469,7 @@ contains
        do k=1, MAX_LEVELS_FILE
           flag(k) = .true.
 
-          if ( depth(k) > 2000.0 ) depth(k) = MISSING_VALUE  ! snz add for rdat-hybn
+          if ( depth(k) > depth_cut ) depth(k) = MISSING_VALUE  ! snz add for rdat-hybn
 
           if ( var_id == TEMP_ID ) then
              if ( data(k) .eq. MISSING_VALUE .or.&
@@ -515,7 +520,7 @@ contains
              do k=1, MAX_LEVELS_FILE
                 flag_bfr(nn,k) = .true.
 
-                if ( depth_bfr(nn,k) > 2000.0 ) depth_bfr(nn,k) = MISSING_VALUE  ! snz add for rdat-hybn
+                if ( depth_bfr(nn,k) > depth_cut ) depth_bfr(nn,k) = MISSING_VALUE  ! snz add for rdat-hybn
 
                 if ( var_id == TEMP_ID ) then
                    if ( data_bfr(nn,k) .eq. MISSING_VALUE .or.&
@@ -548,16 +553,21 @@ contains
        allocate(Prof%data(num_levs));Prof%data(:)=MISSING_VALUE
        allocate(Prof%flag(num_levs));Prof%flag(:)=.false.
        Prof%variable = var_id
-       if ( inst_type < 1 ) inst_type = UNKNOWN
        Prof%inst_type = inst_type
        Prof%levels = num_levs
        Prof%lat = lat; Prof%lon = lon
        Prof%nbr_xi = lon1d(inds(1)); Prof%nbr_yi = lat1d(inds(1))
-       Prof%time_window = window
+       Prof%nbr_dist = dist(1)
+       Prof%time_window = time_window(inst_type)
+       Prof%impact_levels = impact_levels(inst_type)
+       Prof%temp_to_salt = temp_to_salt(inst_type)
+       Prof%salt_to_temp = salt_to_temp(inst_type)
        if ( var_id == TEMP_ID ) then
-          Prof%obs_error = t_err
+          Prof%obs_error = temp_error(inst_type)
+          Prof%loc_dist = temp_dist(inst_type)
        else if ( var_id == SALT_ID ) then
-          Prof%obs_error = s_err
+          Prof%obs_error = salt_error(inst_type)
+          Prof%loc_dist = salt_dist(inst_type)
        end if
        kk = 1
        do k=1, MAX_LEVELS_FILE
@@ -641,6 +651,9 @@ contains
        if ( var_id == TEMP_ID .and. flag_t /= 0.0 ) Prof%accepted = .false.
        if ( var_id == SALT_ID .and. flag_s /= 0.0 ) Prof%accepted = .false.
        if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
+
+       call get_date(Prof%time, yr, mon, day, hr, min, sec)
+       if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) Prof%accepted=.false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -904,11 +917,6 @@ contains
           Prof=>NULL()
       endif
     end do
-
-    !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) then
-            !Current_profiles=>NULL()
-            !write(UNIT=stdout_unit, FMT='("Skip day")')
-    !endif
 
     return
   end subroutine get_profiles
