@@ -1,4 +1,17 @@
-module oda_core_mod
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
+! This module contains a set of dummy interfaces for compiling the MOM6 DA
+! driver code. These interfaces are not finalized and will be replaced by supported
+! interfaces at some later date.
+!
+! 3/22/18
+! matthew.harrison@noaa.gov
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+module ocean_da_core_mod
+
+
+  use mpp_domains_mod, only : domain2d
   use fms_mod, only : file_exist, read_data
   use fms_mod, only : open_namelist_file, check_nml_error, close_file
   use fms_mod, only : error_mesg, FATAL, NOTE
@@ -22,18 +35,17 @@ module oda_core_mod
   use horiz_interp_bilinear_mod, only : horiz_interp_bilinear_new
   use constants_mod, only : DEG_TO_RAD
   ! ODA_tools modules
-  use oda_types_mod, only : ocean_profile_type, grid_type
-  use oda_types_mod, only : TEMP_ID, SALT_ID, MISSING_VALUE
-  use oda_types_mod, only : ODA_PFL, ODA_XBT, ODA_MRB
-  use oda_types_mod, only : UNKNOWN, MAX_LEVELS_FILE, MAX_LINKS
+  use ocean_da_types_mod, only : ocean_profile_type, grid_type
+  use ocean_da_types_mod, only : TEMP_ID, SALT_ID, MISSING_VALUE
+  use ocean_da_types_mod, only : ODA_PFL, ODA_XBT, ODA_MRB
+  use ocean_da_types_mod, only : UNKNOWN, MAX_LEVELS_FILE, MAX_LINKS
   use kdtree, only : kd_root, kd_search_nnearest, kd_init
   use loc_and_dist_mod, only : within_domain
   use obs_tools_mod, only : obs_def_type, def_single_obs
-  !use xbt_adjust, only : xbt_drop_rate_adjust
 
   implicit none
   private
-  public :: oda_core_init
+  public :: ocean_da_core_init
   public :: get_profiles
 
   ! Parameters
@@ -70,7 +82,7 @@ module oda_core_mod
 
 contains
 
-  subroutine oda_core_init(Domain, T_grid, Profiles, model_time) 
+  subroutine ocean_da_core_init(Domain, T_grid, Profiles, model_time)
     type(domain2d), pointer, intent(in) :: Domain
     type(grid_type), pointer, intent(in) :: T_grid
     type(ocean_profile_type), pointer :: Profiles
@@ -163,13 +175,13 @@ contains
              case ('sfc')
                 filetype(nfiles) = SFC_FILE
              case default
-                call error_mesg('oda_core_mod::init_observations', 'error in obs_table entry format', FATAL)
+                call error_mesg('ocean_da_core_mod::init_observations', 'error in obs_table entry format', FATAL)
              end select
           end if
        end if
     end do read_obs
     if ( nfiles > max_files ) then
-       call error_mesg('oda_core_mod::init_observations', 'number of obs files exceeds max_files parameter', FATAL)
+       call error_mesg('ocean_da_core_mod::init_observations', 'number of obs files exceeds max_files parameter', FATAL)
     end if
     CALL mpp_close(unit)
 
@@ -186,7 +198,7 @@ contains
              call open_profile_dataset(Profiles, Domain, T_grid, &
                      trim(input_files(n)), time_s, time_e, obs_variable)
           case default
-             call error_mesg('oda_core_mod::init_observations', 'filetype not currently supported for temp_obs', FATAL)
+             call error_mesg('ocean_da_core_mod::init_observations', 'filetype not currently supported for temp_obs', FATAL)
           end select
        end do
     end if
@@ -202,7 +214,7 @@ contains
              call open_profile_dataset(Profiles, Domain, T_grid, &
                      trim(input_files(n)), time_s, time_e, obs_variable)
           case default
-             call error_mesg('oda_core_mod::init_observations', 'filetype not currently supported for salt_obs', FATAL)
+             call error_mesg('ocean_da_core_mod::init_observations', 'filetype not currently supported for salt_obs', FATAL)
           end select
        end do
     end if
@@ -213,7 +225,8 @@ contains
     deallocate(kdroot)
     deallocate(lon1d, lat1d, glat1d, glon1d)
     deallocate(filetype, input_files)
-  end subroutine oda_core_init
+  end subroutine ocean_da_core_init
+
 
   subroutine open_profile_dataset(Profiles, Domain, T_grid, &
                   filename, time_start, time_end, obs_variable, localize)
@@ -375,13 +388,13 @@ contains
     call mpp_get_atts(depth_axis, len=nlevs)
 
     if ( nlevs > MAX_LEVELS_FILE ) then
-       call error_mesg('oda_core_mod::open_profile_dataset', 'increase parameter MAX_LEVELS_FILE', FATAL)
+       call error_mesg('ocean_da_core_mod::open_profile_dataset', 'increase parameter MAX_LEVELS_FILE', FATAL)
     else if (nlevs < 1) then
-       call error_mesg('oda_core_mod::open_profile_dataset', 'Value of nlevs is less than 1.', FATAL)
+       call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Value of nlevs is less than 1.', FATAL)
     end if
 
     if ( .NOT.ASSOCIATED(field_t) .and. .not. ASSOCIATED(field_s) ) then
-       call error_mesg('oda_core_mod::open_profile_dataset',&
+       call error_mesg('ocean_da_core_mod::open_profile_dataset',&
             & 'profile dataset not used because data not needed for Analysis', NOTE)
        return
     end if
@@ -490,7 +503,7 @@ contains
 
           if ( nlinks > MAX_LINKS ) then
              print *,'nlinks=',nlinks,'in ',filename
-             call error_mesg('oda_core_mod::open_profile_dataset', 'increase parameter MAX_LINKS', FATAL)
+             call error_mesg('ocean_da_core_mod::open_profile_dataset', 'increase parameter MAX_LINKS', FATAL)
           end if
 
           depth_bfr(nlinks,:) = MISSING_VALUE
@@ -566,7 +579,7 @@ contains
        do k=1, MAX_LEVELS_FILE
           if ( flag(k) ) then
              if ( kk > Prof%levels ) then
-                call error_mesg('oda_core_mod::open_profile_dataset',&
+                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
                      & 'Loop value "kk" is greater than profile levels', FATAL)
              end if
              Prof%depth(kk) = depth(k)
@@ -580,7 +593,7 @@ contains
           do k=1, MAX_LEVELS_FILE
              if ( flag_bfr(nn,k) ) then
                 if ( kk > Prof%levels ) then
-                   call error_mesg('oda_core_mod::open_profile_dataset',&
+                   call error_mesg('ocean_da_core_mod::open_profile_dataset',&
                         & 'Loop value "kk" is greater than profile levels (bfr loop)', FATAL)
                 end if
                 Prof%depth(kk) = depth_bfr(nn,k)
@@ -593,7 +606,7 @@ contains
 
        Prof%time = profile_time
 
-       
+
        if ( lat < lat_bound ) then ! calculate interpolation coefficients
           ri0 = frac_index(lon, T_grid%x(:,jsg))
           rj0 = frac_index(lat, T_grid%y(isg,:))
@@ -601,7 +614,7 @@ contains
           j0 = floor(rj0)
           if ( i0 > ieg .or. j0 > jeg ) then
              write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
-             call error_mesg('oda_core_mod::open_profile_dataset',&
+             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
                   & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
           end if
           Prof%i_index = ri0
@@ -624,7 +637,7 @@ contains
           end if
           if ( i0 > ieg .or. j0 > jeg ) then
              write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
-             call error_mesg('oda_core_mod::open_profile_dataset',&
+             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
                   & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
           end if
           if ( Interp%wti(1,1,2) < 1.0 ) then
@@ -694,9 +707,9 @@ contains
                 end if
              end if
              if ( Prof%k_index(k) > real(nk) ) then
-                call error_mesg('oda_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
+                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
              else if ( Prof%k_index(k) < 0.0 ) then
-                call error_mesg('oda_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
+                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
              end if
              k0 = floor(Prof%k_index(k))
 
@@ -816,7 +829,7 @@ contains
                        and [jsc,jec] = [",I5,",",I5,"], with halox = ",I5,", haloy = ",I5,", &
                        k0 = ",I5,", blk = ",I5,", nk = ",I5)') &
                        i, state_index( i ), ii, jj, isc, iec, jsc, jec, halox, haloy, k0, blk, nk
-               call error_mesg('oda_core_mod::open_profile_dataset', trim(emsg_local), FATAL)
+               call error_mesg('ocean_da_core_mod::open_profile_dataset', trim(emsg_local), FATAL)
              end if
            end do
 
@@ -843,7 +856,7 @@ contains
              state_index(7) = state_index(3)
              state_index(8) = state_index(4)
            end if
-       
+
            call def_single_obs(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
          end do
        endif ! calculate forward operator indices and weights
@@ -918,4 +931,5 @@ contains
 
     return
   end subroutine get_profiles
-end module oda_core_mod
+end module ocean_da_core_mod
+

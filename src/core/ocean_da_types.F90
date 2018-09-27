@@ -1,4 +1,15 @@
-module oda_types_mod
+module ocean_da_types_mod
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!
+! This module contains a set of data structures and interfaces for compiling the MOM6 DA
+! driver code. This code is not yet finalized and will be replaced by supported
+! software at some later date.
+!
+! 3/22/18
+! matthew.harrison@noaa.gov
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 #ifndef MAX_LEVS_FILE_
 #define MAX_LEVS_FILE_ 50
 #endif
@@ -79,7 +90,8 @@ module oda_types_mod
      integer :: nbr_xi, nbr_yi ! nearest neighbor model gridpoint for the profile
      real :: nbr_dist ! distance to nearest neighbor model gridpoint
      real, dimension(:), pointer :: depth
-     real, dimension(:), pointer :: data
+     real, dimension(:), pointer :: data_t => NULL(), data_s => NULL()
+     real, dimension(:), pointer :: data => NULL()
      real, dimension(:), pointer :: forecast => NULL()
      real, dimension(:), pointer :: analysis => NULL()
      !integer, dimension(:), pointer :: flag_t
@@ -107,4 +119,4 @@ module oda_types_mod
      integer :: ni, nj, nk
   end type grid_type
 
-end module oda_types_mod
+end module ocean_da_types_mod

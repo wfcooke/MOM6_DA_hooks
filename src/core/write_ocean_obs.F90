@@ -1,11 +1,11 @@
-module write_ocean_data_mod
+module write_ocean_obs_mod
 
 use mpp_io_mod, only : fieldtype, axistype, mpp_open,&
         MPP_OVERWR, MPP_NETCDF, MPP_MULTI, MPP_SINGLE,&
         mpp_write_meta, mpp_write, mpp_close
 use mpp_mod, only : mpp_error, FATAL
-use oda_types_mod, only : missing_value
-use oda_types_mod, only : ocean_profile_type, max_levels_file
+use ocean_da_types_mod, only : missing_value
+use ocean_da_types_mod, only : ocean_profile_type, max_levels_file
 use time_manager_mod, only : time_type, get_time, set_date, operator ( - )
 
 implicit none
@@ -28,7 +28,16 @@ integer, save :: sta_num(max_files), unit_num(max_files), nfiles
 type(time_type) :: ref_time, time
 logical :: module_is_initialized=.false.
 
-public :: open_profile_file, write_profile, close_profile_file, write_ocean_data_init
+integer,save :: nvar_out
+
+integer, save :: sta_num(max_files), unit_num(max_files), nfiles
+
+type(time_type) :: ref_time, time
+
+logical :: module_is_initialized=.false.
+
+public :: open_profile_file, write_profile, close_profile_file, &
+      write_ocean_obs_init
 
 #include <netcdf.inc>
 
@@ -378,7 +387,7 @@ subroutine close_profile_file(unit)
 
 end subroutine close_profile_file
 
-subroutine write_ocean_data_init()
+subroutine write_ocean_obs_init()
 
   module_is_initialized=.true.
 
@@ -386,8 +395,8 @@ subroutine write_ocean_data_init()
 
   return
 
-end subroutine write_ocean_data_init
+end subroutine write_ocean_obs_init
 
-end module write_ocean_data_mod
+end module write_ocean_obs_mod
 
 

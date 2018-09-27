@@ -1,6 +1,6 @@
 module xbt_adjust
 
-  use oda_types_mod, only : ocean_profile_type, missing_value
+  use ocean_da_types_mod, only : ocean_profile_type, missing_value
 
   implicit none
   
