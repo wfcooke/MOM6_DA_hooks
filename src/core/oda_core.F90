@@ -285,13 +285,6 @@ contains
     call mpp_get_compute_domain(Domain, isc, iec, jsc, jec)
     call mpp_get_data_domain(Domain, isd, ied, jsd, jed)
     call mpp_get_global_domain(Domain, isg, ieg, jsg, jeg)
-    if(obs_variable == TEMP_ID) then
-      select case ( trim(filename(13:21)) )
-        case ('PFL_pa2004')
-          print *, "pe=",mpp_pe(),isd,ied,jsd,jed
-        case default
-      end select
-    endif
     lon_len = ied-isd+1
     blk = (jed-jsd+1)*lon_len
     stdout_unit = stdout()
@@ -878,15 +871,17 @@ contains
     integer :: i, yr, mon, day, hr, min, sec
     integer :: stdout_unit
     type(ocean_profile_type), pointer :: PREVIOUS=>NULL()
+    integer, dimension(10) :: current_type
 
     type(time_type) :: tdiff
 
+    current_type = 0
     nprof = 0
     stdout_unit = stdout()
 
     write (UNIT=stdout_unit, FMT='("Gathering profiles for current analysis time")')
     call get_date(model_time, yr, mon, day, hr, min, sec)
-    write (UNIT=stdout_unit, FMT='("Current YYYY/MM/DD = ",I4,"/",I2,"/",I2)') yr, mon, day
+    write (UNIT=stdout_unit, FMT='("Current YYYY/MM/DD = ",I4,"/",I2,"/",I2,",",I2,":",I2)') yr, mon, day, hr, min
 
     Prof=>Profiles
     Current_profiles=>NULL()
@@ -902,6 +897,7 @@ contains
        ! but tdiff criteria has to be set for daily data
        if ( tdiff <= 2*Prof%time_window .and. Prof%accepted ) then
           nprof = nprof + 1
+          !current_type(Prof%inst_type) = current_type(Prof%inst_type) + 1
           Prof%tdiff = tdiff
           if (.not.associated(Current_profiles)) then
               Current_profiles=>Prof
@@ -917,6 +913,8 @@ contains
           Prof=>NULL()
       endif
     end do
+
+    !print *,'pe:', mpp_pe(), current_type(1:3)
 
     return
   end subroutine get_profiles

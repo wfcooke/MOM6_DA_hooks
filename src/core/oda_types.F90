@@ -82,9 +82,15 @@ module oda_types_mod
      real, dimension(:), pointer :: data
      real, dimension(:), pointer :: forecast => NULL()
      real, dimension(:), pointer :: analysis => NULL()
+     !integer, dimension(:), pointer :: flag_t
+     !integer, dimension(:), pointer :: flag_s ! level-by-level flags for salinity
+     !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.
      logical, dimension(:), pointer :: flag
+     real    :: temp_err, salt_err ! measurement error
      type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
+     integer         :: yyyy
+     integer         :: mmdd
      real :: i_index, j_index ! model longitude and latitude indices respectively
      real, dimension(:), pointer :: k_index ! model depth indices
      type(time_type) :: tdiff      ! positive difference between model time and observation time
