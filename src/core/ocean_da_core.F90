@@ -36,12 +36,12 @@ module ocean_da_core_mod
   use constants_mod, only : DEG_TO_RAD
   ! ODA_tools modules
   use ocean_da_types_mod, only : ocean_profile_type, grid_type
+  use ocean_da_types_mod, only : forward_operator_type
   use ocean_da_types_mod, only : TEMP_ID, SALT_ID, MISSING_VALUE
   use ocean_da_types_mod, only : ODA_PFL, ODA_XBT, ODA_MRB
   use ocean_da_types_mod, only : UNKNOWN, MAX_LEVELS_FILE, MAX_LINKS
   use kdtree, only : kd_root, kd_search_nnearest, kd_init
   use loc_and_dist_mod, only : within_domain
-  use obs_tools_mod, only : obs_def_type, def_single_obs
 
   implicit none
   private
@@ -857,7 +857,7 @@ contains
              state_index(8) = state_index(4)
            end if
 
-           call def_single_obs(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
+           call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
          end do
        endif ! calculate forward operator indices and weights
 
@@ -931,5 +931,30 @@ contains
 
     return
   end subroutine get_profiles
+
+  !=======================================================================
+  ! Puts FO interpolation coefficients and state variable indices into an FO_type data structure.
+  subroutine def_forward_operator(num_state, state_ind, coef, obs_def)
+    integer, intent(in) :: num_state
+    integer, dimension(num_state), intent(in) :: state_ind
+    real, dimension(num_state-2), intent(in) :: coef
+    type(forward_operator_type), intent(inout) :: obs_def
+
+    integer :: i
+
+    ! Set aside storage for defining this ob
+    obs_def%num = num_state
+    allocate(obs_def%state_var_index(num_state), obs_def%coef(num_state-2))
+
+    ! Load the state variable index and coefficient for each state variable
+    do i = 1, num_state
+       obs_def%state_var_index(i) = state_ind(i)
+    end do
+
+    do i=1, num_state-2
+       obs_def%coef(i) = coef(i)
+    end do
+  end subroutine def_forward_operator
+
 end module ocean_da_core_mod
 

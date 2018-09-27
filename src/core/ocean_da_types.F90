@@ -26,7 +26,6 @@ module ocean_da_types_mod
 ! Contact: Matthew.Harrison@noaa.gov and Feiyu.Lu@noaa.goy
 
   use time_manager_mod, only : time_type
-  use obs_tools_mod, only : obs_def_type
   !use mpp_domains_mod, only : domain2d
 
   implicit none
@@ -99,7 +98,7 @@ module ocean_da_types_mod
      !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.
      logical, dimension(:), pointer :: flag
      real    :: temp_err, salt_err ! measurement error
-     type(obs_def_type), dimension(:), pointer :: obs_def => NULL()
+     type(forward_operator_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
      integer         :: yyyy
      integer         :: mmdd
@@ -107,6 +106,12 @@ module ocean_da_types_mod
      real, dimension(:), pointer :: k_index ! model depth indices
      type(time_type) :: tdiff      ! positive difference between model time and observation time
   end type ocean_profile_type
+
+  type, public :: forward_operator_type
+     integer :: num
+     integer, pointer :: state_var_index(:)
+     real, pointer :: coef(:)
+  end type forward_operator_type
 
 !> Grid information for ODA purposes, including arrays of
 ! lat, lon, depth, thickness, basin and land mask
