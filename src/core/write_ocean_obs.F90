@@ -28,14 +28,6 @@ integer, save :: sta_num(max_files), unit_num(max_files), nfiles
 type(time_type) :: ref_time, time
 logical :: module_is_initialized=.false.
 
-integer,save :: nvar_out
-
-integer, save :: sta_num(max_files), unit_num(max_files), nfiles
-
-type(time_type) :: ref_time, time
-
-logical :: module_is_initialized=.false.
-
 public :: open_profile_file, write_profile, close_profile_file, &
       write_ocean_obs_init
 
