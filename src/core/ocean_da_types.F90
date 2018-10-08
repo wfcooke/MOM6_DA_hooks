@@ -42,6 +42,7 @@ module ocean_da_types_mod
   integer, save, public :: ODA_PFL = 1
   integer, save, public :: ODA_XBT = 2
   integer, save, public :: ODA_MRB = 3
+  integer, save, public :: ODA_OISST = 4
 
 !> Type for ocean state in DA space (same decomposition and vertical grid)
   type, public :: OCEAN_CONTROL_STRUCT
@@ -61,12 +62,12 @@ module ocean_da_types_mod
      integer :: variable !< variable ids are defined by the ocean_types module (e.g. TEMP_ID, SALT_ID)
      integer :: inst_type !< instrument types are defined by platform class (e.g. MOORING, DROP, etc.) and instrument type (XBT, CDT, etc.)
      integer :: nvar !< number of observations types associated with the current profile
-     real    :: project !< e.g. FGGE, COARE, ACCE, ...
-     real    :: probe !< MBT, XBT, drifting buoy
-     real    :: ref_inst !< instrument (thermograph, hull sensor, ...)
-     integer :: wod_cast_num !< NODC world ocean dataset unique id
+     !real    :: project !< e.g. FGGE, COARE, ACCE, ...
+     !real    :: probe !< MBT, XBT, drifting buoy
+     !real    :: ref_inst !< instrument (thermograph, hull sensor, ...)
+     !integer :: wod_cast_num !< NODC world ocean dataset unique id
      real    :: fix_depth !< adjust profile depths (for XBT drop rate corrections)
-     real    :: ocn_vehicle !< ocean vehicle type
+     !real    :: ocn_vehicle !< ocean vehicle type
      real    :: database_id !< a unique profile id
      integer :: levels !< number of levels in the current profile
      integer :: basin_mask !<1:Southern Ocean, 2:Atlantic Ocean, 3:Pacific Ocean,

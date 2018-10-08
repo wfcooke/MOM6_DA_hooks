@@ -125,8 +125,8 @@ function open_profile_file(name, nvar, grid_lon, grid_lat,thread,fset)
   if (nvar_out .eq. 2) call mpp_write_meta(unit,salt_err_field,(/station_axis/),&
           'salt_error',trim(units),'measurement error of salinity',missing=missing_value)
   
-  call mpp_write_meta(unit,project_field,(/station_axis/),&
-          'project','none','see NODC codes')
+  !call mpp_write_meta(unit,project_field,(/station_axis/),&
+          !'project','none','see NODC codes')
   
   !call mpp_write_meta(unit,probe_field,(/station_axis/),&
   !     'probe','none','see NODC codes')
