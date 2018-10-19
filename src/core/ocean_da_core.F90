@@ -976,8 +976,8 @@ contains
     call mpp_get_atts(lat_axis,len=nlat)
     call mpp_get_atts(time_axis,len=ntime)
     call mpp_get_atts(time_axis, units=time_units)
-    write(UNIT=stdout_unit, FMT='("Time units:",A)') time_units
-    write(UNIT=stdout_unit, FMT='("Dim sizes:",3I5)') nlon,nlat,ntime
+    !write(UNIT=stdout_unit, FMT='("Time units:",A)') time_units
+    !write(UNIT=stdout_unit, FMT='("Dim sizes:",3I5)') nlon,nlat,ntime
 
     allocate(lons(nlon), lats(nlat), times(ntime))
     allocate(sfc_obs(nlon,nlat))
@@ -999,7 +999,7 @@ contains
     end do
 
     call mpp_get_atts(field_sst, siz=sfc_size)
-    write(UNIT=stdout_unit, FMT='("sst size:",3I5)') sfc_size
+    !write(UNIT=stdout_unit, FMT='("sst size:",3I5)') sfc_size
     write(UNIT=stdout_unit, FMT='("Searching for surface obs . . .")')
 
     num_levs = 1
@@ -1012,9 +1012,9 @@ contains
       surface_time = increment_time(obs_time, 43200, 3)
       call get_date(surface_time, yr, mon, day, hr, min, sec)
 
-      write(UNIT=stdout_unit, FMT='("Obs:",F8.2)') sfc_obs(100,100)
-      write(UNIT=stdout_unit, FMT='("Time:",F8.2)') time
-      write(UNIT=stdout_unit, FMT='("PE:",4I6)') mpp_pe(), mon, day, hr
+      !write(UNIT=stdout_unit, FMT='("Obs:",F8.2)') sfc_obs(100,100)
+      !write(UNIT=stdout_unit, FMT='("Time:",F8.2)') time
+      !write(UNIT=stdout_unit, FMT='("PE:",4I6)') mpp_pe(), mon, day, hr
       
       if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
       if ( .not. data_in_period ) cycle
@@ -1241,7 +1241,7 @@ contains
       !print *,'PE:', mpp_pe(), 'Time', k, 'Surface count:', surface_count
     end do
 
-    print *,'PE:', mpp_pe(), 'Surface count:', surface_count
+    !print *,'PE:', mpp_pe(), 'Surface count:', surface_count
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_oisst_dataset
@@ -1300,7 +1300,7 @@ contains
       endif
     end do
 
-    print *,'pe:', mpp_pe(), current_type(1:4)
+    !print *,'pe:', mpp_pe(), current_type(1:4)
 
     return
   end subroutine get_profiles
