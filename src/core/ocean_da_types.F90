@@ -122,6 +122,7 @@ module ocean_da_types_mod
      real, pointer, dimension(:,:,:) :: h=>NULL()
      real, pointer, dimension(:,:) :: basin_mask => NULL()
      real, pointer, dimension(:,:,:) :: mask => NULL()
+     real, pointer, dimension(:,:) :: bathyT => NULL()
      integer :: ni, nj, nk
   end type grid_type
 

@@ -76,6 +76,7 @@ module ocean_da_core_mod
   integer :: obs_days_plus, obs_days_minus
   logical :: temp_obs, salt_obs
   integer :: max_files = 30
+  real :: shelf_depth = 500.0
   namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, depth_cut, &
           data_window, temp_error, salt_error, impact_levels, temp_dist, salt_dist, &
           temp_to_salt, salt_to_temp, &
@@ -669,13 +670,18 @@ contains
           Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
        end if
 
-
        if ( Prof%accepted ) then ! check surface land-sea mask
           if ( i0 /= ieg .and. j0 /= jeg ) then
              if (T_grid%mask(i0,j0,1) == 0.0 .or.&
                   & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
                   & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
                   & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
+                Prof%accepted = .false.
+             end if
+             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+                  & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
+                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+                  & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
                 Prof%accepted = .false.
              end if
           else if ( i0 == ieg .and. j0 /= jeg ) then
@@ -685,16 +691,29 @@ contains
                   & T_grid%mask(1,j0+1,1) == 0.0 ) then
                 Prof%accepted = .false.
              end if
+             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+                  & T_grid%bathyT(1,j0) < shelf_depth .or.&
+                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+                  & T_grid%bathyT(1,j0+1) < shelf_depth ) then
+                Prof%accepted = .false.
+             end if
           else if ( i0 /= ieg .and. j0 == jeg ) then
              if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
+                Prof%accepted = .false.
+             end if
+             if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
+                   & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
                 Prof%accepted = .false.
              end if
           else
              if ( T_grid%mask(i0,j0,1) == 0.0 ) then
                 Prof%accepted = .false.
              end if
+             if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
+                Prof%accepted = .false.
+             end if
           end if
-       end if ! check surface land-sea mask
+       end if ! check surface land-sea mask and depth of ocean
 
        if ( Prof%accepted ) then ! determine vertical position and check mask at depth
           allocate(Prof%k_index(Prof%levels))
@@ -705,6 +724,11 @@ contains
                    Prof%k_index(k) = 0.0
                 else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
                     Prof%k_index(k) = real(nk)
+                    Prof%flag(k)=.false.
+                end if
+             end if
+             if ( k > 3 ) then
+                if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
                     Prof%flag(k)=.false.
                 end if
              end if
