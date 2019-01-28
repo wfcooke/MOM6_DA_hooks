@@ -661,8 +661,8 @@ contains
        if ( var_id == SALT_ID .and. flag_s /= 0.0 ) Prof%accepted = .false.
        if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
 
-       call get_date(Prof%time, yr, mon, day, hr, min, sec)
-       if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) Prof%accepted=.false.
+       !call get_date(Prof%time, yr, mon, day, hr, min, sec)
+       !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) Prof%accepted=.false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -670,7 +670,7 @@ contains
           Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
        end if
 
-       if ( Prof%accepted ) then ! check surface land-sea mask
+       if ( Prof%accepted ) then ! check surface land-sea mask and depth of ocean around profile location
           if ( i0 /= ieg .and. j0 /= jeg ) then
              if (T_grid%mask(i0,j0,1) == 0.0 .or.&
                   & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
@@ -727,7 +727,7 @@ contains
                     Prof%flag(k)=.false.
                 end if
              end if
-             if ( k > 3 ) then
+             if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
                 if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
                     Prof%flag(k)=.false.
                 end if
