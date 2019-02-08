@@ -447,7 +447,7 @@ contains
        if ( localize_data ) then
          call kd_search_nnearest(kdroot, lon, lat, &
                  1, inds, dist, r_num, .false.)
-         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+1, ied-1, jsd+1, jed-1, ni, nj)
+         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+3, ied-3, jsd+3, jed-3, ni, nj)
        else
          data_is_local = .true.
        end if
@@ -1060,7 +1060,7 @@ contains
             call kd_search_nnearest(kdroot, lon, lat, &
                     1, inds, dist, r_num, .false.)
             data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), &
-                    isd+1, ied-1, jsd+1, jed-1, ni, nj)
+                    isd+3, ied-3, jsd+3, jed-3, ni, nj)
           else
             data_is_local = .true.
           end if
