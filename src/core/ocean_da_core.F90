@@ -273,7 +273,7 @@ contains
     integer :: ii, jj
 
     logical :: data_is_local, localize_data, cont
-    logical :: data_in_period
+    logical :: data_in_period, data_in_compute
     logical, dimension(MAX_LEVELS_FILE) :: flag
     logical, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: flag_bfr
 
@@ -455,6 +455,7 @@ contains
          call kd_search_nnearest(kdroot, lon, lat, &
                  1, inds, dist, r_num, .false.)
          data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+2, ied-2, jsd+2, jed-2, ni, nj)
+         data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
        else
          data_is_local = .true.
        end if
@@ -573,6 +574,7 @@ contains
        Prof%lat = lat; Prof%lon = lon
        Prof%nbr_xi = lon1d(inds(1)); Prof%nbr_yi = lat1d(inds(1))
        Prof%nbr_dist = dist(1)
+       Prof%compute = data_in_compute
        Prof%time_window = time_window(inst_type)
        Prof%impact_levels = impact_levels(inst_type)
        Prof%temp_to_salt = temp_to_salt(inst_type)
@@ -935,7 +937,7 @@ contains
     integer :: ii, jj
 
     logical :: data_is_local, localize_data, cont
-    logical :: data_in_period
+    logical :: data_in_period, data_in_compute
     logical, dimension(MAX_LEVELS_FILE) :: flag
     logical, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: flag_bfr
 
@@ -1099,6 +1101,7 @@ contains
          call kd_search_nnearest(kdroot, lon, lat, &
                  1, inds, dist, r_num, .false.)
          data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+2, ied-2, jsd+2, jed-2, ni, nj)
+         data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
        else
          data_is_local = .true.
        end if
@@ -1188,6 +1191,7 @@ contains
        Prof%lat = lat; Prof%lon = lon
        Prof%nbr_xi = lon1d(inds(1)); Prof%nbr_yi = lat1d(inds(1))
        Prof%nbr_dist = dist(1)
+       Prof%compute = data_in_compute
        Prof%time_window = time_window(inst_type)
        Prof%impact_levels = impact_levels(inst_type)
        Prof%temp_to_salt = temp_to_salt(inst_type)
@@ -1508,7 +1512,6 @@ contains
        Prof=>Prof%next
     end do
 
-    print *,'PE:', mpp_pe(), 'temp only count:', temp_count
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_argo_dataset
@@ -1876,10 +1879,8 @@ contains
           Prof=>Prof%next
         end do
       end do
-      !print *,'PE:', mpp_pe(), 'Time', k, 'Surface count:', surface_count
     end do
 
-    !print *,'PE:', mpp_pe(), 'Surface count:', surface_count
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_oisst_dataset
@@ -1921,7 +1922,7 @@ contains
        ! but tdiff criteria has to be set for daily data
        if ( tdiff <= 2*Prof%time_window .and. Prof%accepted ) then
           nprof = nprof + 1
-          current_type(Prof%inst_type) = current_type(Prof%inst_type) + 1
+          if(Prof%compute) current_type(Prof%inst_type) = current_type(Prof%inst_type) + 1
           Prof%tdiff = tdiff
           if (.not.associated(Current_profiles)) then
               Current_profiles=>Prof
@@ -1937,8 +1938,6 @@ contains
           Prof=>NULL()
       endif
     end do
-
-    !print *,'pe:', mpp_pe(), current_type(1:4)
 
     return
   end subroutine get_profiles

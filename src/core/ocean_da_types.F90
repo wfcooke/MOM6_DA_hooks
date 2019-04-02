@@ -61,14 +61,6 @@ module ocean_da_types_mod
   type, public :: ocean_profile_type
      integer :: variable !< variable ids are defined by the ocean_types module (e.g. TEMP_ID, SALT_ID)
      integer :: inst_type !< instrument types are defined by platform class (e.g. MOORING, DROP, etc.) and instrument type (XBT, CDT, etc.)
-     integer :: nvar !< number of observations types associated with the current profile
-     !real    :: project !< e.g. FGGE, COARE, ACCE, ...
-     !real    :: probe !< MBT, XBT, drifting buoy
-     !real    :: ref_inst !< instrument (thermograph, hull sensor, ...)
-     !integer :: wod_cast_num !< NODC world ocean dataset unique id
-     real    :: fix_depth !< adjust profile depths (for XBT drop rate corrections)
-     !real    :: ocn_vehicle !< ocean vehicle type
-     real    :: database_id !< a unique profile id
      integer :: levels !< number of levels in the current profile
      integer :: basin_mask !<1:Southern Ocean, 2:Atlantic Ocean, 3:Pacific Ocean,
                            !! 4:Arctic Ocean, 5:Indian Ocean, 6:Mediterranean Sea, 7:Black Sea,
@@ -89,20 +81,15 @@ module ocean_da_types_mod
      type(ocean_profile_type), pointer :: cprev=>NULL()
      integer :: nbr_xi, nbr_yi ! nearest neighbor model gridpoint for the profile
      real :: nbr_dist ! distance to nearest neighbor model gridpoint
+     logical :: compute
      real, dimension(:), pointer :: depth
-     real, dimension(:), pointer :: data_t => NULL(), data_s => NULL()
      real, dimension(:), pointer :: data => NULL()
      real, dimension(:), pointer :: forecast => NULL()
      real, dimension(:), pointer :: analysis => NULL()
-     !integer, dimension(:), pointer :: flag_t
-     !integer, dimension(:), pointer :: flag_s ! level-by-level flags for salinity
      !::sdu:: For now ECDA use flag as a logical, will likely change in future releases.
      logical, dimension(:), pointer :: flag
-     real    :: temp_err, salt_err ! measurement error
      type(forward_operator_type), dimension(:), pointer :: obs_def => NULL()
      type(time_type) :: time
-     integer         :: yyyy
-     integer         :: mmdd
      real :: i_index, j_index ! model longitude and latitude indices respectively
      real, dimension(:), pointer :: k_index ! model depth indices
      type(time_type) :: tdiff      ! positive difference between model time and observation time
