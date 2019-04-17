@@ -63,8 +63,8 @@ module ocean_da_core_mod
 
   ! ocean_obs_nml variables
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
-  real :: obs_sbound = -87.0 !< set obs domain
-  real :: obs_nbound = 87.0 !< set obs domain
+  real, dimension(10) :: obs_sbound = -87.0 !< set obs domain
+  real, dimension(10) :: obs_nbound = 87.0 !< set obs domain
   real :: depth_cut = 2000.0
   real, dimension(10) :: data_window = 24.0
   real, dimension(10) :: temp_error = 1.0
@@ -234,8 +234,6 @@ contains
           end select
        end do
     end if
-
-    print *, "PE No.", mpp_pe(), ",types", type_count
 
     ! Deallocate before exiting routine
     deallocate(kdroot)
@@ -437,7 +435,7 @@ contains
        if ( lon .gt. 360.0 ) lon = lon - 360.0
        if ( lon .gt. 60.0 ) lon = lon - 360.0
 
-       if ( lat < obs_sbound .or. lat > obs_nbound ) then
+       if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) then
          station_count = station_count + 1
          if ( station_count .gt. nstation ) cont = .false.
          cycle
@@ -667,8 +665,8 @@ contains
        if ( var_id == SALT_ID .and. flag_s /= 0.0 ) Prof%accepted = .false.
        if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
 
-       !call get_date(Prof%time, yr, mon, day, hr, min, sec)
-       !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.10) Prof%accepted=.false.
+       call get_date(Prof%time, yr, mon, day, hr, min, sec)
+       if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.8) Prof%accepted=.false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -1081,7 +1079,7 @@ contains
        if ( lon .gt. 360.0 ) lon = lon - 360.0
        if ( lon .gt. 60.0 ) lon = lon - 360.0
 
-       if ( lat < obs_sbound .or. lat > obs_nbound ) then
+       if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) then
          station_count = station_count + 1
          if ( station_count .gt. nstation ) cont = .false.
          cycle
@@ -1508,7 +1506,6 @@ contains
        Prof=>Prof%next
     end do
 
-    print *,'PE:', mpp_pe(), 'temp only count:', temp_count
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_argo_dataset
@@ -1614,8 +1611,6 @@ contains
     call mpp_get_atts(lat_axis,len=nlat)
     call mpp_get_atts(time_axis,len=ntime)
     call mpp_get_atts(time_axis, units=time_units)
-    !write(UNIT=stdout_unit, FMT='("Time units:",A)') time_units
-    !write(UNIT=stdout_unit, FMT='("Dim sizes:",3I5)') nlon,nlat,ntime
 
     allocate(lons(nlon), lats(nlat), times(ntime))
     allocate(sfc_obs(nlon,nlat))
@@ -1637,7 +1632,6 @@ contains
     end do
 
     call mpp_get_atts(field_sst, siz=sfc_size)
-    !write(UNIT=stdout_unit, FMT='("sst size:",3I5)') sfc_size
     write(UNIT=stdout_unit, FMT='("Searching for surface obs . . .")')
 
     num_levs = 1
@@ -1650,10 +1644,6 @@ contains
       surface_time = increment_time(obs_time, 43200, 3)
       call get_date(surface_time, yr, mon, day, hr, min, sec)
 
-      !write(UNIT=stdout_unit, FMT='("Obs:",F8.2)') sfc_obs(100,100)
-      !write(UNIT=stdout_unit, FMT='("Time:",F8.2)') time
-      !write(UNIT=stdout_unit, FMT='("PE:",4I6)') mpp_pe(), mon, day, hr
-      
       if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
       if ( .not. data_in_period ) cycle
 
@@ -1668,7 +1658,7 @@ contains
           if ( lon .gt. 360.0 ) lon = lon - 360.0
           if ( lon .gt. 60.0 ) lon = lon - 360.0
 
-          if ( lat < obs_sbound .or. lat > obs_nbound ) cycle
+          if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) cycle
 
           if ( localize_data ) then
             call kd_search_nnearest(kdroot, lon, lat, &
@@ -1876,7 +1866,6 @@ contains
           Prof=>Prof%next
         end do
       end do
-      !print *,'PE:', mpp_pe(), 'Time', k, 'Surface count:', surface_count
     end do
 
     !print *,'PE:', mpp_pe(), 'Surface count:', surface_count
@@ -1939,7 +1928,6 @@ contains
     end do
 
     !print *,'pe:', mpp_pe(), current_type(1:4)
-
     return
   end subroutine get_profiles
 
