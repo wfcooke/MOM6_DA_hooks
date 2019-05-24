@@ -67,11 +67,13 @@ module ocean_da_core_mod
   real, dimension(10) :: obs_nbound = 87.0 !< set obs domain
   real :: depth_cut = 2000.0
   real, dimension(10) :: data_window = 24.0
+  integer, dimension(10) :: sec_offset = 0
+  integer, dimension(10) :: day_offset = 0
   real, dimension(10) :: temp_error = 1.0
-  real, dimension(10) :: salt_error = 1.0
+  real, dimension(10) :: salt_error = 0.2
   integer, dimension(10) :: impact_levels = 3
-  real, dimension(10) :: temp_dist = 500.0e3
-  real, dimension(10) :: salt_dist = 500.0e3
+  real, dimension(10) :: temp_dist = 200.0e3
+  real, dimension(10) :: salt_dist = 200.0e3
   logical, dimension(10) :: temp_to_salt = .false.
   logical, dimension(10) :: salt_to_temp = .false.
   integer :: obs_days_plus, obs_days_minus
@@ -79,8 +81,8 @@ module ocean_da_core_mod
   integer :: max_files = 30
   real :: shelf_depth = 500.0
   namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, depth_cut, &
-          data_window, temp_error, salt_error, impact_levels, temp_dist, salt_dist, &
-          temp_to_salt, salt_to_temp, &
+          data_window, sec_offset, day_offset, temp_error, salt_error, impact_levels, &
+          temp_dist, salt_dist, temp_to_salt, salt_to_temp, &
           temp_obs, salt_obs, max_files, obs_days_minus, obs_days_plus
 
 contains
@@ -441,7 +443,7 @@ contains
          cycle
        end if
 
-       profile_time = get_cal_time(time, time_units, 'julian')
+       profile_time = get_cal_time(time, time_units, 'gregorian')
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -665,10 +667,11 @@ contains
 
        if ( var_id == TEMP_ID .and. flag_t /= 0.0 ) Prof%accepted = .false.
        if ( var_id == SALT_ID .and. flag_s /= 0.0 ) Prof%accepted = .false.
+       ! removing some profiles due to bad placement at 0/0 lat/lon
        if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
 
-       call get_date(Prof%time, yr, mon, day, hr, min, sec)
-       if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.8) Prof%accepted=.false.
+       !call get_date(Prof%time, yr, mon, day, hr, min, sec)
+       !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.8) Prof%accepted=.false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -1087,7 +1090,7 @@ contains
          cycle
        end if
 
-       profile_time = get_cal_time(time, time_units, 'julian')
+       profile_time = get_cal_time(time, time_units, 'gregorian')
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -1643,9 +1646,9 @@ contains
       data_in_period = .false.
       time = times(k)
       call mpp_read(unit, field_sst, sfc_obs, tindex=k)
-      obs_time = get_cal_time(time, time_units, 'julian')
+      obs_time = get_cal_time(time, time_units, 'gregorian')
       ! Weekly OISST is timed at beginning of the 7-day period, so increase time by 3.5 days
-      surface_time = increment_time(obs_time, 43200, 3)
+      surface_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
       call get_date(surface_time, yr, mon, day, hr, min, sec)
 
       if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
@@ -1682,7 +1685,7 @@ contains
           depth = 0.5
           flag = .true.
 
-          if ( data .gt. 40 .or. data .lt. -5 ) then
+          if ( data .gt. 50 .or. data .lt. -5 ) then
             flag = .false.
           end if
 
@@ -1891,7 +1894,7 @@ contains
 
     type(time_type) :: tdiff
 
-    current_type = 0
+    !current_type = 0
     nprof = 0
     stdout_unit = stdout()
 
@@ -1913,7 +1916,7 @@ contains
        ! but tdiff criteria has to be set for daily data
        if ( tdiff <= 2*Prof%time_window .and. Prof%accepted ) then
           nprof = nprof + 1
-          !if(Prof%compute) current_type(Prof%inst_type) = current_type(Prof%inst_type) + 1
+          !current_type(Prof%inst_type) = current_type(Prof%inst_type) + 1
           Prof%tdiff = tdiff
           if (.not.associated(Current_profiles)) then
               Current_profiles=>Prof
