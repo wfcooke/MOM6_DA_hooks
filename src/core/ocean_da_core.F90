@@ -63,8 +63,8 @@ module ocean_da_core_mod
 
   ! ocean_obs_nml variables
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
-  real, dimension(10) :: obs_sbound = -87.0 !< set obs domain
-  real, dimension(10) :: obs_nbound = 87.0 !< set obs domain
+  real, dimension(10) :: obs_sbound = -89.0 !< set obs domain
+  real, dimension(10) :: obs_nbound = 89.0 !< set obs domain
   real :: depth_cut = 2000.0
   real, dimension(10) :: data_window = 24.0
   integer, dimension(10) :: sec_offset = 0
@@ -72,6 +72,8 @@ module ocean_da_core_mod
   real, dimension(10) :: temp_error = 1.0
   real, dimension(10) :: salt_error = 0.2
   integer, dimension(10) :: impact_levels = 3
+  real :: sst_vimpact_temp = -1.75
+  integer :: sst_vimpact_levels = 5
   real, dimension(10) :: temp_dist = 200.0e3
   real, dimension(10) :: salt_dist = 200.0e3
   logical, dimension(10) :: temp_to_salt = .false.
@@ -280,7 +282,7 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
-    type(time_type) :: profile_time
+    type(time_type) :: obs_time, profile_time
     type(axistype), pointer :: depth_axis, station_axis
     type(axistype), allocatable, dimension(:), target :: axes
     type(fieldtype), allocatable, dimension(:), target :: fields
@@ -443,7 +445,8 @@ contains
          cycle
        end if
 
-       profile_time = get_cal_time(time, time_units, 'gregorian')
+       obs_time = get_cal_time(time, time_units, 'julian')
+       profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -454,7 +457,7 @@ contains
        if ( localize_data ) then
          call kd_search_nnearest(kdroot, lon, lat, &
                  1, inds, dist, r_num, .false.)
-         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+2, ied-2, jsd+2, jed-2, ni, nj)
+         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+1, ied-1, jsd+1, jed-1, ni, nj)
          data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
        else
          data_is_local = .true.
@@ -670,8 +673,8 @@ contains
        ! removing some profiles due to bad placement at 0/0 lat/lon
        if ( abs(Prof%lat) < 0.001 .and. abs(Prof%lon) < 0.1 ) Prof%accepted = .false.
 
-       !call get_date(Prof%time, yr, mon, day, hr, min, sec)
-       !if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.4 .and. day.le.8) Prof%accepted=.false.
+       call get_date(Prof%time, yr, mon, day, hr, min, sec)
+       if(yr.eq.1991 .and. mon.eq.12 .and. day.ge.5 .and. day.le.8) Prof%accepted=.false.
 
        if (i0 < 1 .or. j0 < 1) then
           Prof%accepted = .false.
@@ -945,7 +948,7 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
-    type(time_type) :: profile_time
+    type(time_type) :: obs_time, profile_time
     type(axistype), pointer :: depth_axis, station_axis
     type(axistype), allocatable, dimension(:), target :: axes
     type(fieldtype), allocatable, dimension(:), target :: fields
@@ -1090,7 +1093,8 @@ contains
          cycle
        end if
 
-       profile_time = get_cal_time(time, time_units, 'gregorian')
+       obs_time = get_cal_time(time, time_units, 'julian')
+       profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -1101,7 +1105,7 @@ contains
        if ( localize_data ) then
          call kd_search_nnearest(kdroot, lon, lat, &
                  1, inds, dist, r_num, .false.)
-         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+2, ied-2, jsd+2, jed-2, ni, nj)
+         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+1, ied-1, jsd+1, jed-1, ni, nj)
          data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
        else
          data_is_local = .true.
@@ -1645,15 +1649,14 @@ contains
     do k=1, ntime
       data_in_period = .false.
       time = times(k)
-      call mpp_read(unit, field_sst, sfc_obs, tindex=k)
-      obs_time = get_cal_time(time, time_units, 'gregorian')
+      obs_time = get_cal_time(time, time_units, 'julian')
       ! Weekly OISST is timed at beginning of the 7-day period, so increase time by 3.5 days
       surface_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
-      call get_date(surface_time, yr, mon, day, hr, min, sec)
 
       if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
       if ( .not. data_in_period ) cycle
 
+      call mpp_read(unit, field_sst, sfc_obs, tindex=k)
       do j=1, nlat
         do i=1, nlon
           lon = lons(i)
@@ -1671,7 +1674,7 @@ contains
             call kd_search_nnearest(kdroot, lon, lat, &
                     1, inds, dist, r_num, .false.)
             data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), &
-                    isd+2, ied-2, jsd+2, jed-2, ni, nj)
+                    isd+1, ied-1, jsd+1, jed-1, ni, nj)
           else
             data_is_local = .true.
           end if
@@ -1706,6 +1709,8 @@ contains
           Prof%obs_error = temp_error(inst_type)
           Prof%loc_dist = temp_dist(inst_type)
           Prof%time = surface_time
+
+          if ( data .lt. sst_vimpact_temp ) Prof%impact_levels = sst_vimpact_levels
 
           if ( lat < lat_bound ) then ! calculate interpolation coefficients
              ri0 = frac_index(lon, T_grid%x(:,jsg))
