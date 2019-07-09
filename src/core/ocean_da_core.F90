@@ -85,6 +85,7 @@ module ocean_da_core_mod
   namelist /ocean_obs_nml/ max_levels, obs_sbound, obs_nbound, depth_cut, &
           data_window, sec_offset, day_offset, temp_error, salt_error, impact_levels, &
           temp_dist, salt_dist, temp_to_salt, salt_to_temp, &
+          sst_vimpact_temp, sst_vimpact_levels, &
           temp_obs, salt_obs, max_files, obs_days_minus, obs_days_plus
 
 contains
