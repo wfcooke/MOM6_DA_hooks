@@ -1094,7 +1094,7 @@ contains
          cycle
        end if
 
-       obs_time = get_cal_time(time, time_units, 'julian')
+       obs_time = get_cal_time(time, time_units, 'noleap')
        profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
