@@ -53,6 +53,7 @@ module ocean_da_core_mod
   integer, parameter :: PROFILE_FILE = 1
   integer, parameter :: SURFACE_FILE = 2
   integer, parameter :: ARGO_FILE = 3
+  integer, parameter :: MOORING_FILE = 4
 ! time window for DROP, MOORING and SATELLITE data respectively
   type(time_type) , dimension(10) :: time_window
   integer, dimension(10) :: type_count = 0
@@ -185,6 +186,8 @@ contains
                 filetype(nfiles) = SURFACE_FILE
              case ('argo')
                 filetype(nfiles) = ARGO_FILE
+             case ('mooring')
+                filetype(nfiles) = MOORING_FILE
              case default
                 call error_mesg('ocean_da_core_mod::init_observations', 'error in obs_table entry format', FATAL)
              end select
@@ -214,6 +217,9 @@ contains
           case (ARGO_FILE)
              call open_argo_dataset(Profiles, Domain, T_grid, &
                      trim(input_files(n)), time_s, time_e, obs_variable)
+          case (MOORING_FILE)
+             call open_mooring_dataset(Profiles, Domain, T_grid, &
+                     trim(input_files(n)), time_s, time_e, obs_variable)
           case default
              call error_mesg('ocean_da_core_mod::init_observations', 'filetype not currently supported for temp_obs', FATAL)
           end select
@@ -233,6 +239,9 @@ contains
           case (SURFACE_FILE)
           case (ARGO_FILE)
              call open_argo_dataset(Profiles, Domain, T_grid, &
+                     trim(input_files(n)), time_s, time_e, obs_variable)
+          case (MOORING_FILE)
+             call open_mooring_dataset(Profiles, Domain, T_grid, &
                      trim(input_files(n)), time_s, time_e, obs_variable)
           case default
              call error_mesg('ocean_da_core_mod::init_observations', 'filetype not currently supported for salt_obs', FATAL)
@@ -1884,6 +1893,369 @@ contains
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_oisst_dataset
+
+  subroutine open_mooring_dataset(Profiles, Domain, T_grid, &
+                  filename, time_start, time_end, obs_variable, localize)
+    type(ocean_profile_type), pointer :: Profiles
+    !< This is an unstructured recursive list of profiles
+    !< which are either within the localized domain corresponding
+    !< to the Domain argument, or the global profile list
+    type(domain2d), pointer, intent(in) :: Domain !< MOM grid type for the local domain
+    type(grid_type), pointer, intent(in) :: T_grid !< MOM grid type for the local domain
+    character(len=*), intent(in) :: filename !< filename containing profile data
+    type(time_type), intent(in) :: time_start, time_end !< start and end times for the analysis
+    integer, intent(in), optional :: obs_variable !< If present, then extract corresponding data
+    !< from file, otherwise, extract all available data which.
+    logical, intent(in), optional :: localize !< Localize the observations to the current computational domain
+
+    real :: lon, lat, time
+    integer :: nlat, nlon, ntime
+    integer :: ni, nj, nk
+    real :: ri0, rj0
+    real, dimension(MAX_LEVELS_FILE*2) :: depth, data
+    logical, dimension(MAX_LEVELS_FILE*2) :: flag
+    type(ocean_profile_type), pointer :: Prof
+
+    integer :: unit, ndim, nvar, natt, max_profiles
+    integer :: stdout_unit
+    integer :: inst_type, var_id
+    integer :: num_levs, k, kk, i, j, i0, j0, k0, nlevs, a, nn, nlinks
+    integer :: yr, mon, day, hr, min, sec
+    integer :: ii, jj
+
+    logical :: data_is_local, localize_data, data_in_period
+
+    character(len=32) :: fldname, axisname, time_units
+    character(len=138) :: emsg_local
+
+    type(time_type) :: moring_time, obs_time
+    type(axistype), pointer :: lon_axis, lat_axis, time_axis, depth_axis
+    type(axistype), allocatable, dimension(:), target :: axes
+    type(fieldtype), allocatable, dimension(:), target :: fields
+    type(fieldtype), pointer :: field_data
+
+    real, allocatable, dimension(:) :: lons, lats, times
+    real, allocatable, dimension(:,:,:) :: mooring_obs
+    integer :: mooring_size(4)
+
+    integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
+    integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
+    integer :: surface_count = 0
+    type(horiz_interp_type) :: Interp
+    real :: lon_out(1, 1), lat_out(1, 1)
+    real :: lat_bound = 59.0
+    integer :: inds(1), r_num
+    real :: dist(1), frac_lon, frac_lat, frac_k
+    real, dimension(6) :: coef
+    integer, dimension(8) :: state_index
+
+    Prof=>Profiles
+    do while (associated(Prof%next))
+      Prof=>Prof%next
+    end do
+
+    if ( PRESENT(localize) ) then
+       localize_data = localize
+    else
+       localize_data = .true.
+    end if
+
+    ni = T_grid%ni; nj = T_grid%nj; nk = T_grid%nk
+    call mpp_get_compute_domain(Domain, isc, iec, jsc, jec)
+    call mpp_get_data_domain(Domain, isd, ied, jsd, jed)
+    call mpp_get_global_domain(Domain, isg, ieg, jsg, jeg)
+    lon_len = ied-isd+1
+    blk = (jed-jsd+1)*lon_len
+    stdout_unit = stdout()
+
+    inst_type = ODA_MRB
+    var_id = obs_variable
+
+    call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
+    call mpp_get_info(unit, ndim, nvar, natt, ntime)
+
+    write (UNIT=stdout_unit, FMT='("Opened mooring dataset: ",A)') trim(filename)
+
+    !! get axis information
+    !allocate(axes(ndim))
+    !call mpp_get_axes(unit, axes)
+    !do i=1, ndim
+       !call mpp_get_atts(axes(i), name=axisname)
+       !select case ( trim(axisname) )
+       !case ('lon')
+          !lon_axis => axes(i)
+       !case ('lat')
+          !lat_axis => axes(i)
+       !case ('time')
+          !time_axis => axes(i)
+       !end select
+    !end do
+
+    !call mpp_get_atts(lon_axis,len=nlon)
+    !call mpp_get_atts(lat_axis,len=nlat)
+    !call mpp_get_atts(time_axis,len=ntime)
+    !call mpp_get_atts(time_axis, units=time_units)
+
+    !allocate(lons(nlon), lats(nlat), times(ntime))
+    !allocate(sfc_obs(nlon,nlat))
+
+    !call mpp_get_axis_data(lon_axis, lons)
+    !call mpp_get_axis_data(lat_axis, lats)
+    !call mpp_get_times(unit, times)
+
+    !! get field information
+    !allocate(fields(nvar))
+    !call mpp_get_fields(unit, fields)
+    !field_sst=>NULL()
+    !do i=1, nvar
+      !call mpp_get_atts(fields(i), name=fldname)
+      !select case (trim(fldname))
+      !case ('sst')
+        !field_sst => fields(i)
+      !end select
+    !end do
+
+    !call mpp_get_atts(field_sst, siz=sfc_size)
+    !write(UNIT=stdout_unit, FMT='("Searching for surface obs . . .")')
+
+    !num_levs = 1
+    !do k=1, ntime
+      !data_in_period = .false.
+      !time = times(k)
+      !obs_time = get_cal_time(time, time_units, 'julian')
+      !! Weekly OISST is timed at beginning of the 7-day period, so increase time by 3.5 days
+      !surface_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
+
+      !if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
+      !if ( .not. data_in_period ) cycle
+
+      !call mpp_read(unit, field_sst, sfc_obs, tindex=k)
+      !do j=1, nlat
+        !do i=1, nlon
+          !lon = lons(i)
+          !lat = lats(j)
+          !data = MISSING_VALUE   ! snz add
+          !data_is_local = .false.
+
+          !if ( lon .lt. 0.0 ) lon = lon + 360.0
+          !if ( lon .gt. 360.0 ) lon = lon - 360.0
+          !if ( lon .gt. 60.0 ) lon = lon - 360.0
+
+          !if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) cycle
+
+          !if ( localize_data ) then
+            !call kd_search_nnearest(kdroot, lon, lat, &
+                    !1, inds, dist, r_num, .false.)
+            !data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), &
+                    !isd+1, ied-1, jsd+1, jed-1, ni, nj)
+          !else
+            !data_is_local = .true.
+          !end if
+
+          !if (.not. data_is_local) cycle
+
+          !surface_count = surface_count + 1
+          !type_count(inst_type) = type_count(inst_type)+1
+
+          !data = sfc_obs(i,j)
+          !depth = 0.5
+          !flag = .true.
+
+          !if ( data .gt. 50 .or. data .lt. -5 ) then
+            !flag = .false.
+          !end if
+
+          !! allocate profile structure content and put in data
+          !allocate(Prof%depth(1));Prof%depth=depth
+          !allocate(Prof%data(1));Prof%data=data
+          !allocate(Prof%flag(1));Prof%flag=flag
+          !Prof%variable = var_id
+          !Prof%inst_type = inst_type
+          !Prof%levels = num_levs
+          !Prof%lat = lat; Prof%lon = lon
+          !Prof%nbr_xi = lon1d(inds(1)); Prof%nbr_yi = lat1d(inds(1))
+          !Prof%nbr_dist = dist(1)
+          !Prof%time_window = time_window(inst_type)
+          !Prof%impact_levels = impact_levels(inst_type)
+          !Prof%temp_to_salt = temp_to_salt(inst_type)
+          !Prof%salt_to_temp = salt_to_temp(inst_type)
+          !Prof%obs_error = temp_error(inst_type)
+          !Prof%loc_dist = temp_dist(inst_type)
+          !Prof%time = surface_time
+
+          !if ( data .lt. sst_vimpact_temp ) Prof%impact_levels = sst_vimpact_levels
+
+          !if ( lat < lat_bound ) then ! calculate interpolation coefficients
+             !ri0 = frac_index(lon, T_grid%x(:,jsg))
+             !rj0 = frac_index(lat, T_grid%y(isg,:))
+             !i0 = floor(ri0)
+             !j0 = floor(rj0)
+             !if ( i0 > ieg .or. j0 > jeg ) then
+                !write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
+                !call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+                     !& 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
+             !end if
+             !Prof%i_index = ri0
+             !Prof%j_index = rj0
+          !else ! tripolar grids
+             !lon_out(1,1) = lon*DEG_TO_RAD
+             !lat_out(1,1) = lat*DEG_TO_RAD
+             !call horiz_interp_bilinear_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
+                  !& lon_out, lat_out, new_search=.true., no_crash_when_not_found=.true.)
+
+             !if ( Interp%wti(1,1,2) < 1.0 ) then
+                !i0 = Interp%i_lon(1,1,1)
+             !else
+                !i0 = Interp%i_lon(1,1,2)
+             !end if
+             !if ( Interp%wtj(1,1,2) < 1.0 ) then
+                !j0 = Interp%j_lat(1,1,1)
+             !else
+                !j0 = Interp%j_lat(1,1,2)
+             !end if
+             !if ( i0 > ieg .or. j0 > jeg ) then
+                !write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
+                !call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+                     !& 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
+             !end if
+             !if ( Interp%wti(1,1,2) < 1.0 ) then
+                !Prof%i_index =Interp%i_lon(1,1,1) + Interp%wti(1,1,2)
+             !else
+                !Prof%i_index =Interp%i_lon(1,1,2)
+             !end if
+             !if (Interp%wtj(1,1,2) < 1.0) then
+                !Prof%j_index =Interp%j_lat(1,1,1) + Interp%wtj(1,1,2)
+             !else
+                !Prof%j_index =Interp%j_lat(1,1,2)
+             !end if
+          !end if ! interpolation coefficients
+
+          !Prof%accepted = .true.
+
+          !if (i0 < 1 .or. j0 < 1) then
+             !Prof%accepted = .false.
+          !else
+             !Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
+          !end if
+
+          !if ( Prof%accepted ) then ! check surface land-sea mask
+             !if ( i0 /= ieg .and. j0 /= jeg ) then
+                !if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+                     !& T_grid%mask(i0+1,j0,1) == 0.0 .or.&
+                     !& T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+                     !& T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
+                   !Prof%accepted = .false.
+                !end if
+             !else if ( i0 == ieg .and. j0 /= jeg ) then
+                !if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+                     !& T_grid%mask(1,j0,1) == 0.0 .or.&
+                     !& T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+                     !& T_grid%mask(1,j0+1,1) == 0.0 ) then
+                   !Prof%accepted = .false.
+                !end if
+             !else if ( i0 /= ieg .and. j0 == jeg ) then
+                !if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
+                   !Prof%accepted = .false.
+                !end if
+             !else
+                !if ( T_grid%mask(i0,j0,1) == 0.0 ) then
+                   !Prof%accepted = .false.
+                !end if
+             !end if
+          !end if ! check surface land-sea mask
+   
+          !if ( Prof%accepted ) then ! determine vertical position and check mask at depth
+             !allocate(Prof%k_index(Prof%levels))
+             !do kk=1, Prof%levels
+                !Prof%k_index(kk) = 0.0
+             !end do
+          !end if ! determine vertical position and check mask at depth
+   
+          !if ( Prof%accepted ) then ! calculate forward operator indices and weights
+            !allocate(Prof%obs_def(Prof%levels))
+            !ii = i0; jj = j0
+            !frac_lat = Prof%j_index - jj
+            !frac_lon = Prof%i_index - ii
+   
+            !coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
+            !coef(2) = frac_lon * (1.0 - frac_lat)
+            !coef(3) = (1.0 - frac_lon) * frac_lat
+            !coef(4) = frac_lon * frac_lat
+   
+            !if ( ied > ni .and. ii < isd ) ii = ii + ni
+            !if ( isd < 1 .and. ii > ied ) ii = ii - ni
+   
+            !do kk=1, Prof%levels
+              !k0 = floor(Prof%k_index(kk))
+              !frac_k = Prof%k_index(kk) - k0
+   
+              !if ( k0 == 0 ) then
+                !state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
+                !state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
+                !state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
+                !state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
+                !state_index(5) = state_index(1)
+                !state_index(6) = state_index(2)
+                !state_index(7) = state_index(3)
+                !state_index(8) = state_index(4)
+              !else if (k0 == nk ) then
+                !state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
+                !state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
+                !state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
+                !state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
+                !state_index(5) = state_index(1)
+                !state_index(6) = state_index(2)
+                !state_index(7) = state_index(3)
+                !state_index(8) = state_index(4)
+              !else
+                !state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
+                !state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
+                !state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+                !state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+                !state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
+                !state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
+                !state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+                !state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+              !end if
+   
+              !if ( frac_lon == 0.0 ) then
+                !state_index(2) = state_index(1)
+                !state_index(4) = state_index(3)
+                !state_index(6) = state_index(5)
+                !state_index(8) = state_index(7)
+              !end if
+   
+              !if ( frac_lat == 0.0 ) then
+                !state_index(3) = state_index(1)
+                !state_index(4) = state_index(2)
+                !state_index(7) = state_index(5)
+                !state_index(8) = state_index(6)
+              !end if
+   
+              !coef(5) = 1.0 - frac_k
+              !coef(6) = frac_k
+   
+              !if ( frac_k == 0.0 ) then
+                !state_index(5) = state_index(1)
+                !state_index(6) = state_index(2)
+                !state_index(7) = state_index(3)
+                !state_index(8) = state_index(4)
+              !end if
+   
+              !call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(kk))
+            !end do
+          !endif ! calculate forward operator indices and weights
+   
+          !allocate(Prof%next) ! allocate next profile and link it to current one
+          !Prof%next%prev=>Prof
+          !Prof=>Prof%next
+        !end do
+      !end do
+    !end do
+
+    call mpp_sync_self()
+    call mpp_close(unit)
+  end subroutine open_mooring_dataset
 
   ! get profiles obs relevant to current analysis interval
   subroutine get_profiles(model_time, Profiles, Current_profiles)
