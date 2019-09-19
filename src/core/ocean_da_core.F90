@@ -56,7 +56,7 @@ module ocean_da_core_mod
   integer, parameter :: MOORING_FILE = 4
 ! time window for DROP, MOORING and SATELLITE data respectively
   type(time_type) , dimension(10) :: time_window
-  integer, dimension(10) :: type_count = 0
+  !integer, dimension(10) :: type_count = 0
 
   integer, allocatable, dimension(:) :: lon1d, lat1d
   real, allocatable, dimension(:) :: glon1d, glat1d
@@ -480,7 +480,7 @@ contains
        end if
 
        profile_count = profile_count + 1
-       type_count(inst_type) = type_count(inst_type)+1
+       !type_count(inst_type) = type_count(inst_type)+1
 
        call mpp_read(unit, field_depth, depth(1:nlevs), tindex=station_count)
        if ( var_id == TEMP_ID ) then
@@ -1128,7 +1128,7 @@ contains
        end if
 
        profile_count = profile_count + 1
-       type_count(inst_type) = type_count(inst_type)+1
+       !type_count(inst_type) = type_count(inst_type)+1
 
        call mpp_read(unit, field_depth, depth(1:nlevs), tindex=station_count)
        if ( var_id == TEMP_ID ) then
@@ -1692,7 +1692,7 @@ contains
           if (.not. data_is_local) cycle
 
           surface_count = surface_count + 1
-          type_count(inst_type) = type_count(inst_type)+1
+          !type_count(inst_type) = type_count(inst_type)+1
 
           data = sfc_obs(i,j)
           depth = 0.5
@@ -1998,7 +1998,6 @@ contains
     call mpp_get_atts(depth_axis,len=ndepth)
     call mpp_get_atts(time_axis,len=ntime)
     call mpp_get_atts(time_axis, units=time_units)
-    if ( mpp_pe() == mpp_root_pe() ) print *,"data size",nlon,nlat,ndepth,ntime
 
     allocate(lons(nlon), lats(nlat), depths(ndepth), times(ntime))
     allocate(mooring_obs(ntime,ndepth,nlat,nlon))
@@ -2010,10 +2009,6 @@ contains
     call mpp_get_axis_data(lat_axis, lats)
     call mpp_get_axis_data(depth_axis, depths)
     call mpp_get_axis_data(time_axis, times)
-    if ( mpp_pe() == mpp_root_pe() ) print *, time_units
-    if ( mpp_pe() == mpp_root_pe() ) print *, lats
-    if ( mpp_pe() == mpp_root_pe() ) print *, lons
-    if ( mpp_pe() == mpp_root_pe() ) print *, depths
 
     ! get field information
     allocate(fields(nvar))
@@ -2031,7 +2026,6 @@ contains
 
     call mpp_get_atts(field_t, siz=mooring_size)
     write(UNIT=stdout_unit, FMT='("Searching for mooring obs . . .")')
-    if ( mpp_pe() == mpp_root_pe() ) print *,"mooring size",mooring_size
 
     call mpp_read(unit, field_t, mooring_obs)
     call mpp_read(unit, field_quality, mooring_quality)
@@ -2043,9 +2037,6 @@ contains
 
       if ( mooring_time >= time_start .and. mooring_time <= time_end ) data_in_period = .true.
       if ( .not. data_in_period ) cycle
-
-      call get_date(mooring_time, yr, mon, day, hr, min, sec)
-      if ( mpp_pe() == mpp_root_pe() ) print *,"Time=",t1,yr,mon,day,hr
 
       do j=1, nlat
         do i=1, nlon
@@ -2077,8 +2068,6 @@ contains
           num_levs = 0
           data=mooring_obs(t1,:,j,i)
           quality=mooring_quality(t1,:,j,i)
-          !print *,data
-          !print *,quality
           do k=1, ndepth
              flag(k) = .true.
              if ( data(k)>50 .or. data(k)<-10 .or. quality(k)<0.5 .or. quality(k)>2.5) then
@@ -2088,7 +2077,6 @@ contains
              end if
           end do
           if (num_levs == 0) cycle
-          print *,"num_levs",num_levs
 
           !! allocate profile structure content and put in data
           allocate(Prof%depth(num_levs))
@@ -2387,7 +2375,6 @@ contains
       end do
     end do
 
-    print *,"PE",mpp_pe(),"mooring count",mooring_count
     call mpp_sync_self()
     call mpp_close(unit)
   end subroutine open_mooring_dataset
