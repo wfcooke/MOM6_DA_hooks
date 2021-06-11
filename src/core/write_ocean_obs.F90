@@ -24,7 +24,6 @@ logical :: module_is_initialized=.false.
 
 public :: open_profile_file, write_profile, close_profile_file, write_ocean_obs_init
 
-#include <netcdf.inc>
 
 contains
 
