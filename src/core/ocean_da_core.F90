@@ -11,29 +11,31 @@
 module ocean_da_core_mod
 
 
-  use mpp_domains_mod, only : domain2d
-  use fms_mod, only : file_exist, read_data
-  use fms_mod, only : open_namelist_file, check_nml_error, close_file
-  use fms_mod, only : error_mesg, FATAL, NOTE
-#ifdef INTERNAL_FILE_NML
+  USE fms2_io_mod, ONLY: ascii_read, get_dimension_size, get_dimension_size, get_variable_attribute
+  USE fms2_io_mod, ONLY: FmsNetcdfDomainFile_t
+  USE fms2_io_mod, ONLY: open_file, close_file, read_data, get_global_attribute
+  USE fms2_io_mod, ONLY: get_num_variables, get_num_dimensions, variable_exists
+
+  use fms_mod, only : check_nml_error
+  use fms_mod, only : error_mesg, FATAL, NOTE, WARNING
   USE mpp_mod, ONLY: input_nml_file
-#endif
   use mpp_mod, only : mpp_sum, stdout, stdlog, mpp_sync_self
   use mpp_mod, only : mpp_pe, mpp_root_pe
-  use mpp_io_mod, only : mpp_open, mpp_close, MPP_ASCII, MPP_RDONLY, MPP_MULTI, MPP_SINGLE, MPP_NETCDF
-  use mpp_io_mod, only : mpp_get_atts, mpp_get_info, mpp_get_fields, mpp_read, axistype, fieldtype, mpp_get_axes
-  use mpp_io_mod, only : mpp_get_times
-  use mpp_io_mod, only : mpp_get_axis_data, mpp_get_field_name
   use mpp_domains_mod, only : mpp_get_compute_domain, mpp_get_data_domain
-  use mpp_domains_mod, only : domain2d, mpp_get_global_domain
+  use mpp_domains_mod, only : domain2d, mpp_get_global_domain, center
   use time_manager_mod, only : time_type, set_time, get_date
   use time_manager_mod, only : decrement_time, increment_time
   use time_manager_mod, only : operator( <= ), operator( >= ), operator(*)
   use time_manager_mod, only : operator( - ), operator( > ), operator ( < )
   use get_cal_time_mod, only : get_cal_time
-  use axis_utils_mod, only : frac_index
-  use horiz_interp_type_mod, only: horiz_interp_type
-  use horiz_interp_bilinear_mod, only : horiz_interp_bilinear_new
+  use axis_utils2_mod, only : frac_index
+  !use horiz_interp_type_mod, only: horiz_interp_type
+  !use horiz_interp_bilinear_mod, only : horiz_interp_bilinear_new, horiz_interp_bilinear_del
+  use         horiz_interp_mod, only: horiz_interp_type,     &
+                                    horiz_interp_init,     &
+                                    horiz_interp_new,      &
+                                    horiz_interp,          &
+                                    horiz_interp_del
   use constants_mod, only : DEG_TO_RAD
   ! ODA_tools modules
   use ocean_da_types_mod, only : ocean_profile_type, grid_type
@@ -54,29 +56,29 @@ module ocean_da_core_mod
   integer, parameter :: SURFACE_FILE = 2
   integer, parameter :: ARGO_FILE = 3
   integer, parameter :: MOORING_FILE = 4
-! time window for DROP, MOORING and SATELLITE data respectively
+  !time window for DROP, MOORING and SATELLITE data respectively
   type(time_type) , dimension(10) :: time_window
-  !integer, dimension(10) :: type_count = 0
+!  !integer, dimension(10) :: type_count = 0
 
-  integer, allocatable, dimension(:) :: lon1d, lat1d
-  real, allocatable, dimension(:) :: glon1d, glat1d
-  type(kd_root), allocatable :: kdroot
+  integer,       allocatable, dimension(:) :: lon1d, lat1d
+  real,          allocatable, dimension(:) :: glon1d, glat1d
+  type(kd_root), allocatable               :: kdroot
 
   ! ocean_obs_nml variables
   integer :: max_levels = 1000 !< maximium number of levels for a single profile
-  real, dimension(10) :: obs_sbound = -89.0 !< set obs domain
-  real, dimension(10) :: obs_nbound = 89.0 !< set obs domain
-  real :: depth_cut = 2000.0
-  real, dimension(10) :: data_window = 24.0
+  real,    dimension(10) :: obs_sbound = -89.0 !< set obs domain
+  real,    dimension(10) :: obs_nbound = 89.0 !< set obs domain
+  real                   :: depth_cut = 2000.0
+  real,    dimension(10) :: data_window = 24.0
   integer, dimension(10) :: sec_offset = 0
   integer, dimension(10) :: day_offset = 0
-  real, dimension(10) :: temp_error = 1.0
-  real, dimension(10) :: salt_error = 0.2
+  real,    dimension(10) :: temp_error = 1.0
+  real,    dimension(10) :: salt_error = 0.2
   integer, dimension(10) :: impact_levels = 3
-  real :: sst_vimpact_temp = -1.75
-  integer :: sst_vimpact_levels = 5
-  real, dimension(10) :: temp_dist = 200.0e3
-  real, dimension(10) :: salt_dist = 200.0e3
+  real                   :: sst_vimpact_temp = -1.75
+  integer                :: sst_vimpact_levels = 5
+  real,    dimension(10) :: temp_dist = 200.0e3
+  real,    dimension(10) :: salt_dist = 200.0e3
   logical, dimension(10) :: temp_to_salt = .false.
   logical, dimension(10) :: salt_to_temp = .false.
   integer :: obs_days_plus, obs_days_minus
@@ -107,21 +109,24 @@ contains
     integer :: i, j, n, obs_variable, ni, nj
     integer :: ioun, io_status, ierr
     integer :: stdout_unit, stdlog_unit
-    integer :: nfiles, nrecs, unit
+    integer :: nfiles, num_lines, unit
     integer, dimension(:), allocatable :: filetype
 
     character(len=256) :: record
     character(len=128), dimension(:), allocatable :: input_files
+    CHARACTER(len=:), DIMENSION(:), ALLOCATABLE :: ocean_obs_table
 
     type(obs_entry_type) :: tbl_entry
 
     stdout_unit = stdout()
     stdlog_unit = stdlog()
 
-    ioun = open_namelist_file()
-    read(UNIT=ioun, NML=ocean_obs_nml, IOSTAT=io_status)
-    ierr = check_nml_error(io_status,'ocean_obs_nml')
-    call close_file(ioun)
+!--------------------------------------------------------------------
+!    read namelist.
+!--------------------------------------------------------------------
+    read (input_nml_file, nml=ocean_obs_nml, iostat=io_status)
+    ierr = check_nml_error(IOSTAT=io_status,NML_NAME="OCEAN_OBS_NML")
+
 
     write (UNIT=stdlog_unit, NML=ocean_obs_nml)
     if ( mpp_pe() == mpp_root_pe() ) then
@@ -159,25 +164,17 @@ contains
     enddo
     
     nfiles = 0
-    nrecs=0
-    call mpp_open(unit, 'ocean_obs_table', action=MPP_RDONLY)
-    read_obs: do while ( nfiles <= max_files )
-       read (UNIT=unit, FMT='(A)', IOSTAT=io_status) record
-       if ( io_status < 0 ) then
-          exit read_obs
-       else if ( io_status > 0 ) then
-          cycle read_obs
-       else
-          nrecs = nrecs + 1
-          if ( record(1:1) == '#' ) cycle read_obs
-          read ( UNIT=record, FMT=*, IOSTAT=io_status ) tbl_entry
+    call ascii_read('ocean_obs_table', ocean_obs_table, num_lines=num_lines)
+    read_obs: do n = 1, num_lines 
+          read ( UNIT=ocean_obs_table(n), FMT=*, IOSTAT=io_status ) tbl_entry
           if ( io_status < 0 ) then
              exit read_obs
           else if ( io_status > 0 ) then
              cycle read_obs
           else
-             nfiles = nfiles + 1
+             if ( tbl_entry%filename(1:1) == '#' ) cycle read_obs
              write (UNIT=stdout_unit, FMT='("Obs filename:",A," type:",A)') tbl_entry%filename,tbl_entry%file_type
+             nfiles = nfiles + 1
              input_files(nfiles) = tbl_entry%filename
              select case ( trim(tbl_entry%file_type) )
              case ('profiles')
@@ -192,12 +189,10 @@ contains
                 call error_mesg('ocean_da_core_mod::init_observations', 'error in obs_table entry format', FATAL)
              end select
           end if
-       end if
     end do read_obs
     if ( nfiles > max_files ) then
        call error_mesg('ocean_da_core_mod::init_observations', 'number of obs files exceeds max_files parameter', FATAL)
     end if
-    CALL mpp_close(unit)
 
     if( .not. associated(Profiles) ) allocate(Profiles)
 
@@ -292,16 +287,13 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
+    type(FmsNetcdfDomainFile_t) :: fileobj
     type(time_type) :: obs_time, profile_time
-    type(axistype), pointer :: depth_axis, station_axis
-    type(axistype), allocatable, dimension(:), target :: axes
-    type(fieldtype), allocatable, dimension(:), target :: fields
-    type(fieldtype), pointer :: field_lon, field_lat, field_flag, field_flag_s, field_time, field_depth, field_t, field_s
-    type(fieldtype), pointer :: field_t_error, field_s_error, field_link, field_t_flag, field_s_flag
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
     integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
     integer :: profile_count = 0
+    integer :: dimsize
     type(horiz_interp_type) :: Interp
     real :: lon_out(1, 1), lat_out(1, 1)
     real :: lat_bound = 59.0
@@ -344,70 +336,22 @@ contains
        var_id = obs_variable
     end if
 
-    call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
-    call mpp_get_info(unit, ndim, nvar, natt, nstation)
+    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+       ndim= get_num_dimensions(fileobj)
+       nvar= get_num_variables(fileobj)
+       write (UNIT=stdout_unit, FMT='("Opened profile dataset: ",A)') trim(filename)
+    else
+       call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Cannot read '//trim(filename), FATAL)
+    endif
+    call get_dimension_size(fileobj,"depth_index",nlevs)
+    call get_dimension_size(fileobj,"station_index",nstation)
 
-    write (UNIT=stdout_unit, FMT='("Opened profile dataset: ",A)') trim(filename)
     if (nstation .EQ. 0) then
       write(UNIT=stdout_unit, FMT='("There are ZERO records in this dataset.")')
-      call mpp_close(unit)
+      call close_file(fileobj)
       return
     end if
 
-    ! get axis information
-    allocate(axes(ndim))
-    call mpp_get_axes(unit, axes)
-    do i=1, ndim
-       call mpp_get_atts(axes(i), name=axisname)
-       select case ( trim(axisname) )
-       case ('depth_index')
-          depth_axis => axes(i)
-       case ('station_index')
-          station_axis => axes(i)
-       end select
-    end do
-
-    ! get field information
-    allocate(fields(nvar))
-    call mpp_get_fields(unit, fields)
-    field_lon=>NULL();field_lat=>NULL()
-    field_flag=>NULL();field_flag_s=>NULL();field_time=>NULL()
-    field_t=>NULL();field_t_error=>NULL();field_t_flag=>NULL()
-    field_s=>NULL();field_s_error=>NULL();field_s_flag=>NULL()
-    field_depth=>NULL();field_link=>NULL()
-    do i=1, nvar
-      call mpp_get_atts(fields(i), name=fldname)
-      select case (trim(fldname))
-      case ('longitude')
-        field_lon => fields(i)
-      case ('latitude')
-        field_lat => fields(i)
-      case ('profile_flag')
-        field_flag => fields(i)
-      case ('profile_flag_s')
-        field_flag_s => fields(i)
-      case ('time')
-        field_time => fields(i)
-      case ('temp')
-        field_t => fields(i)
-      case ('salt')
-        field_s => fields(i)
-      case ('depth')
-        field_depth => fields(i)
-      case ('link')
-        field_link => fields(i)
-      case ('temp_error')
-        field_t_error => fields(i)
-      case ('temp_flag')
-        field_t_flag => fields(i)
-      case ('salt_error')
-        field_s_error => fields(i)
-      case ('salt_flag')
-        field_s_flag => fields(i)
-      end select
-    end do
-
-    call mpp_get_atts(depth_axis, len=nlevs)
 
     if ( nlevs > MAX_LEVELS_FILE ) then
        call error_mesg('ocean_da_core_mod::open_profile_dataset', 'increase parameter MAX_LEVELS_FILE', FATAL)
@@ -415,7 +359,7 @@ contains
        call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Value of nlevs is less than 1.', FATAL)
     end if
 
-    if ( .NOT.ASSOCIATED(field_t) .and. .not. ASSOCIATED(field_s) ) then
+    if ( .NOT. variable_exists(fileobj, 'temp') .and. .NOT. variable_exists(fileobj, 'salt')  ) then 
        call error_mesg('ocean_da_core_mod::open_profile_dataset',&
             & 'profile dataset not used because data not needed for Analysis', NOTE)
        return
@@ -424,8 +368,8 @@ contains
     write(UNIT=stdout_unit, FMT='("There are ",I8," records in this dataset.")') nstation
     write(UNIT=stdout_unit, FMT='("Searching for profiles . . .")')
 
-    call mpp_get_atts(field_time, units=time_units)
-
+    call get_variable_attribute(fileobj, "time", "units", time_units)
+    
     station_count = 1
     cont = .true.
 
@@ -433,66 +377,31 @@ contains
        depth = MISSING_VALUE  ! snz add
        data = MISSING_VALUE   ! snz add
 
-       call mpp_read(unit, field_lon, lon, tindex=station_count)
-       call mpp_read(unit, field_lat, lat, tindex=station_count)
-       call mpp_read(unit, field_time, time, tindex=station_count)
+       call read_data(fileobj, "longitude", lon, unlim_dim_level=station_count)
+       call read_data(fileobj, "latitude", lat, unlim_dim_level=station_count)
+       call read_data(fileobj, "time", time, unlim_dim_level=station_count)
        if ( var_id == TEMP_ID ) then
-         call mpp_read(unit, field_flag, flag_t, tindex=station_count)
+         call read_data(fileobj, "profile_flag", flag_t, unlim_dim_level=station_count)
        else if ( var_id == SALT_ID ) then
-         call mpp_read(unit, field_flag_s, flag_s, tindex=station_count)
+         call read_data(fileobj, "profile_flag_s", flag_s, unlim_dim_level=station_count)
        end if
 
-       data_is_local = .false.
-       data_in_period = .false.
-
-       if ( lon .lt. 0.0 ) lon = lon + 360.0
-       if ( lon .gt. 360.0 ) lon = lon - 360.0
-       if ( lon .gt. 60.0 ) lon = lon - 360.0
-
-       if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) then
-         station_count = station_count + 1
-         if ( station_count .gt. nstation ) cont = .false.
-         cycle
-       end if
-
-       obs_time = get_cal_time(time, time_units, 'julian')
-       profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
-       if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
-       if ( .not. data_in_period ) then
-         station_count = station_count + 1
-         if ( station_count .gt. nstation ) cont = .false.
-         cycle
-       end if
-
-       if ( localize_data ) then
-         call kd_search_nnearest(kdroot, lon, lat, &
-                 1, inds, dist, r_num, .false.)
-         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+1, ied-1, jsd+1, jed-1, ni, nj)
-         data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
-       else
-         data_is_local = .true.
-       end if
-
-       if (.not. data_is_local) then
-          station_count = station_count + 1
-          if ( station_count .gt. nstation ) cont = .false.
-          cycle
-       end if
 
        profile_count = profile_count + 1
        !type_count(inst_type) = type_count(inst_type)+1
 
-       call mpp_read(unit, field_depth, depth(1:nlevs), tindex=station_count)
+       call read_data(fileobj, "depth", depth(1:nlevs), unlim_dim_level=station_count)
        if ( var_id == TEMP_ID ) then
-         call mpp_read(unit, field_t, data(1:nlevs), tindex=station_count)
-         call mpp_read(unit, field_t_error, profile_error, tindex=station_count)
-         call mpp_read(unit, field_t_flag, t_flag(1:nlevs), tindex=station_count)
+         call read_data(fileobj, "temp", data(1:nlevs), unlim_dim_level=station_count)
+         call read_data(fileobj, "temp_error", profile_error, unlim_dim_level=station_count)
+         call read_data(fileobj, "temp_flag", t_flag(1:nlevs), unlim_dim_level=station_count)
+         
        else if ( var_id == SALT_ID ) then
-         call mpp_read(unit, field_s, data(1:nlevs), tindex=station_count)
-         call mpp_read(unit, field_s_error, profile_error, tindex=station_count)
-         call mpp_read(unit, field_s_flag, s_flag(1:nlevs), tindex=station_count)
+         call read_data(fileobj, "salt", data(1:nlevs), unlim_dim_level=station_count)
+         call read_data(fileobj, "salt_error", profile_error, unlim_dim_level=station_count)
+         call read_data(fileobj, "salt_flag", t_flag(1:nlevs), unlim_dim_level=station_count)
        end if
-       call mpp_read(unit, field_link, rlink, tindex=station_count)
+       call read_data(fileobj, "link", rlink, unlim_dim_level=station_count)
 
        num_levs = 0
        do k=1, MAX_LEVELS_FILE
@@ -531,18 +440,56 @@ contains
 
           depth_bfr(nlinks,:) = MISSING_VALUE
           data_bfr(nlinks,:) = MISSING_VALUE
-          call mpp_read(unit, field_depth, depth_bfr(nlinks,1:nlevs), tindex=station_link)
+          call read_data(fileobj, "depth", depth_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
           if ( var_id == TEMP_ID ) then
-             call mpp_read(unit, field_t, data_bfr(nlinks,1:nlevs), tindex=station_link)
-             call mpp_read(unit, field_t_flag, t_flag_bfr(nlinks,1:nlevs), tindex=station_link)
+             call read_data(fileobj, "temp", data_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
+             call read_data(fileobj, "temp_flag", t_flag_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
           else if ( var_id == SALT_ID ) then
-             call mpp_read(unit, field_s, data_bfr(nlinks,1:nlevs), tindex=station_link)
-             call mpp_read(unit, field_s_flag, s_flag_bfr(nlinks,1:nlevs), tindex=station_link)
+             call read_data(fileobj, "salt", data_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
+             call read_data(fileobj, "salt_flag", s_flag_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
           end if
-          call mpp_read(unit, field_link, rlink, tindex=station_link)
+          call read_data(fileobj, "link", rlink, unlim_dim_level=station_link)
           station_link = station_link + 1
        end do
        station_count = station_link ! set record counter to start of next profile
+
+       ! Now let us figure out if we are on the local core domain
+       data_is_local = .false.
+       data_in_period = .false.
+
+       if ( lon .lt. 0.0 ) lon = lon + 360.0
+       if ( lon .gt. 360.0 ) lon = lon - 360.0
+       if ( lon .gt. 60.0 ) lon = lon - 360.0
+
+       if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) then
+         station_count = station_count + 1
+         if ( station_count .gt. nstation ) cont = .false.
+         cycle
+       end if
+
+       obs_time = get_cal_time(time, time_units, 'julian')
+       profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
+       if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
+       if ( .not. data_in_period ) then
+         station_count = station_count + 1
+         if ( station_count .gt. nstation ) cont = .false.
+         cycle
+       end if
+
+       if ( localize_data ) then
+         call kd_search_nnearest(kdroot, lon, lat, &
+                 1, inds, dist, r_num, .false.)
+         data_is_local = within_domain(lon1d(inds(1)), lat1d(inds(1)), isd+1, ied-1, jsd+1, jed-1, ni, nj)
+         data_in_compute = within_domain(lon1d(inds(1)), lat1d(inds(1)), isc, iec, jsc, jec, ni, nj)
+       else
+         data_is_local = .true.
+       end if
+
+       if (.not. data_is_local) then
+          station_count = station_count + 1
+          if ( station_count .gt. nstation ) cont = .false.
+          cycle
+       end if
 
        if ( nlinks > 0 ) then
           do nn=1, nlinks
@@ -573,6 +520,7 @@ contains
        end if
 
        if ( num_levs == 0 ) then
+          station_count = station_count + 1
           if ( station_count .gt. nstation ) cont = .false.
           cycle
        end if
@@ -630,51 +578,53 @@ contains
 
        Prof%time = profile_time
 
-
-       if ( lat < lat_bound ) then ! calculate interpolation coefficients
-          ri0 = frac_index(lon, T_grid%x(:,jsg))
-          rj0 = frac_index(lat, T_grid%y(isg,:))
-          i0 = floor(ri0)
-          j0 = floor(rj0)
-          if ( i0 > ieg .or. j0 > jeg ) then
-             write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
-             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                  & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
-          end if
-          Prof%i_index = ri0
-          Prof%j_index = rj0
-       else ! tripolar grids
-          lon_out(1,1) = lon*DEG_TO_RAD
-          lat_out(1,1) = lat*DEG_TO_RAD
-          call horiz_interp_bilinear_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
-               & lon_out, lat_out, new_search=.true., no_crash_when_not_found=.true.)
-
-          if ( Interp%wti(1,1,2) < 1.0 ) then
-             i0 = Interp%i_lon(1,1,1)
-          else
-             i0 = Interp%i_lon(1,1,2)
-          end if
-          if ( Interp%wtj(1,1,2) < 1.0 ) then
-             j0 = Interp%j_lat(1,1,1)
-          else
-             j0 = Interp%j_lat(1,1,2)
-          end if
-          if ( i0 > ieg .or. j0 > jeg ) then
-             write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
-             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                  & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
-          end if
-          if ( Interp%wti(1,1,2) < 1.0 ) then
-             Prof%i_index =Interp%i_lon(1,1,1) + Interp%wti(1,1,2)
-          else
-             Prof%i_index =Interp%i_lon(1,1,2)
-          end if
-          if (Interp%wtj(1,1,2) < 1.0) then
-             Prof%j_index =Interp%j_lat(1,1,1) + Interp%wtj(1,1,2)
-          else
-             Prof%j_index =Interp%j_lat(1,1,2)
-          end if
-       end if ! interpolation coefficients
+       call calc_interp_coeffs("open_profile_dataset", Prof, lat, lon, T_grid, isg, ieg, jsg, jeg,i0,j0)
+!       call horiz_interp_init
+!       if ( lat < lat_bound ) then ! calculate interpolation coefficients
+!          ri0 = frac_index(lon, T_grid%x(:,jsg))
+!          rj0 = frac_index(lat, T_grid%y(isg,:))
+!          i0 = floor(ri0)
+!          j0 = floor(rj0)
+!          if ( i0 > ieg .or. j0 > jeg ) then
+!             write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
+!             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+!                  & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
+!          end if
+!          Prof%i_index = ri0
+!          Prof%j_index = rj0
+!       else ! tripolar grids
+!          lon_out(1,1) = lon*DEG_TO_RAD
+!          lat_out(1,1) = lat*DEG_TO_RAD
+!          call horiz_interp_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
+!               & lon_out, lat_out, interp_method="bilinear", new_search=.true., no_crash_when_not_found=.true.)
+!
+!          if ( Interp%horizInterpReals8_type%wti(1,1,2) < 1.0 ) then
+!             i0 = Interp%i_lon(1,1,1)
+!          else
+!             i0 = Interp%i_lon(1,1,2)
+!          end if
+!          if ( Interp%horizInterpReals8_type%wtj(1,1,2) < 1.0 ) then
+!             j0 = Interp%j_lat(1,1,1)
+!          else
+!             j0 = Interp%j_lat(1,1,2)
+!          end if
+!          if ( i0 > ieg .or. j0 > jeg ) then
+!             write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
+!             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+!                  & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
+!          end if
+!          if ( Interp%horizInterpReals8_type%wti(1,1,2) < 1.0 ) then
+!             Prof%i_index =Interp%i_lon(1,1,1) + Interp%horizInterpReals8_type%wti(1,1,2)
+!          else
+!             Prof%i_index =Interp%i_lon(1,1,2)
+!          end if
+!          if (Interp%horizInterpReals8_type%wtj(1,1,2) < 1.0) then
+!             Prof%j_index =Interp%j_lat(1,1,1) + Interp%horizInterpReals8_type%wtj(1,1,2)
+!          else
+!             Prof%j_index =Interp%j_lat(1,1,2)
+!          end if
+!          call horiz_interp_del(Interp)
+!       end if ! interpolation coefficients
 
        Prof%accepted = .true.
 
@@ -692,222 +642,229 @@ contains
           Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
        end if
 
+!Start of common mask_depth_check code 
        if ( Prof%accepted ) then ! check surface land-sea mask and depth of ocean around profile location
-          if ( i0 /= ieg .and. j0 /= jeg ) then
-             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                  & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                  & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else if ( i0 == ieg .and. j0 /= jeg ) then
-             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                  & T_grid%mask(1,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                  & T_grid%mask(1,j0+1,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(1,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                  & T_grid%bathyT(1,j0+1) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else if ( i0 /= ieg .and. j0 == jeg ) then
-             if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                   & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else
-             if ( T_grid%mask(i0,j0,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          end if
-       end if ! check surface land-sea mask and depth of ocean
-
-       if ( Prof%accepted ) then ! determine vertical position and check mask at depth
-          allocate(Prof%k_index(Prof%levels))
-          do k=1, Prof%levels
-             Prof%k_index(k) = frac_index(Prof%depth(k), (/T_grid%z(i0,j0,:)/))
-             if ( Prof%k_index(k) < 1.0 ) then
-                if ( Prof%depth(k) < T_grid%z(i0,j0,1) ) then
-                   Prof%k_index(k) = 0.0
-                else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
-                    Prof%k_index(k) = real(nk)
-                    Prof%flag(k)=.false.
-                end if
-             end if
-             if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
-                if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
-                    Prof%flag(k)=.false.
-                end if
-             end if
-             if ( Prof%k_index(k) > real(nk) ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
-             else if ( Prof%k_index(k) < 0.0 ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
-             end if
-             k0 = floor(Prof%k_index(k))
-
-             if ( k0 >= 1 ) THEN ! snz add
-                if ( Prof%flag(k) ) then ! flag
-                   if ( i0 /= ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0+1,k0) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 == ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(1,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                           & T_grid%mask(1,j0+1,k0) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 /= ieg .and. j0 == jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   end if
-
-                   if ( i0 /= ieg .and. j0 /= jeg) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0+1,k0+1) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 == ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(1,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                           & T_grid%mask(1,j0+1,k0+1) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 /= ieg .and. j0 == jeg ) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0+1) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   end if
-
-                   if ( Prof%data(k) == MISSING_VALUE &
-                           .or. Prof%depth(k) == MISSING_VALUE ) then
-                      Prof%flag(k) = .false.
-                   end if
-                end if ! flag
-             end if ! snz add
-          end do
+          call check_mask_depth_shelf("open_profile_dataset", Prof, T_grid, i0, j0, ieg, jeg, nk)
+!          if ( i0 /= ieg .and. j0 /= jeg ) then
+!             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+!                  & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
+!                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+!                  & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
+!                Prof%accepted = .false.
+!             end if
+!             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+!                  & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
+!                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+!                  & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
+!                Prof%accepted = .false.
+!             end if
+!          else if ( i0 == ieg .and. j0 /= jeg ) then
+!             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+!                  & T_grid%mask(1,j0,1) == 0.0 .or.&
+!                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+!                  & T_grid%mask(1,j0+1,1) == 0.0 ) then
+!                Prof%accepted = .false.
+!             end if
+!             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+!                  & T_grid%bathyT(1,j0) < shelf_depth .or.&
+!                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+!                  & T_grid%bathyT(1,j0+1) < shelf_depth ) then
+!                Prof%accepted = .false.
+!             end if
+!          else if ( i0 /= ieg .and. j0 == jeg ) then
+!             if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
+!                Prof%accepted = .false.
+!             end if
+!             if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
+!                   & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
+!                Prof%accepted = .false.
+!             end if
+!          else
+!             if ( T_grid%mask(i0,j0,1) == 0.0 ) then
+!                Prof%accepted = .false.
+!             end if
+!             if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
+!                Prof%accepted = .false.
+!             end if
+!          end if
+!       end if ! check surface land-sea mask and depth of ocean
+!
+!       if ( Prof%accepted ) then ! determine vertical position and check mask at depth
+!          allocate(Prof%k_index(Prof%levels))
+!          do k=1, Prof%levels
+!             Prof%k_index(k) = frac_index(Prof%depth(k), (/T_grid%z(i0,j0,:)/))
+!             if ( Prof%k_index(k) < 1.0 ) then
+!                if ( Prof%depth(k) < T_grid%z(i0,j0,1) ) then
+!                   Prof%k_index(k) = 0.0
+!                else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
+!                    Prof%k_index(k) = real(nk)
+!                    Prof%flag(k)=.false.
+!                end if
+!             end if
+!             if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
+!                if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
+!                    Prof%flag(k)=.false.
+!                end if
+!             end if
+!             if ( Prof%k_index(k) > real(nk) ) then
+!                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
+!             else if ( Prof%k_index(k) < 0.0 ) then
+!                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
+!             end if
+!             k0 = floor(Prof%k_index(k))
+!
+!             if ( k0 >= 1 ) THEN ! snz add
+!                if ( Prof%flag(k) ) then ! flag
+!                   if ( i0 /= ieg .and. j0 /= jeg ) then
+!                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0,k0) == 0.0 .or.&
+!                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0+1,k0) == 0.0 ) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else if ( i0 == ieg .and. j0 /= jeg ) then
+!                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+!                           & T_grid%mask(1,j0,k0) == 0.0 .or.&
+!                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
+!                           & T_grid%mask(1,j0+1,k0) == 0.0) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else if ( i0 /= ieg .and. j0 == jeg ) then
+!                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0,k0) == 0.0) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else
+!                      if ( T_grid%mask(i0,j0,k0) == 0.0 ) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   end if
+!
+!                   if ( i0 /= ieg .and. j0 /= jeg) then
+!                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0+1,k0+1) == 0.0 ) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else if ( i0 == ieg .and. j0 /= jeg ) then
+!                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(1,j0,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(1,j0+1,k0+1) == 0.0) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else if ( i0 /= ieg .and. j0 == jeg ) then
+!                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+!                           & T_grid%mask(i0+1,j0,k0+1) == 0.0) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   else
+!                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 ) then
+!                         Prof%flag(k) = .false.
+!                      end if
+!                   end if
+!
+!                   if ( Prof%data(k) == MISSING_VALUE &
+!                           .or. Prof%depth(k) == MISSING_VALUE ) then
+!                      Prof%flag(k) = .false.
+!                   end if
+!                end if ! flag
+!             end if ! snz add
+!          end do
        end if ! determine vertical position and check mask at depth
 
        if ( Prof%accepted ) then ! calculate forward operator indices and weights
-         allocate(Prof%obs_def(Prof%levels))
-         ii = i0; jj = j0
-         frac_lat = Prof%j_index - jj
-         frac_lon = Prof%i_index - ii
-
-         coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
-         coef(2) = frac_lon * (1.0 - frac_lat)
-         coef(3) = (1.0 - frac_lon) * frac_lat
-         coef(4) = frac_lon * frac_lat
-
-         if ( ied > ni .and. ii < isd ) ii = ii + ni
-         if ( isd < 1 .and. ii > ied ) ii = ii - ni
-
-         do k=1, Prof%levels
-           k0 = floor(Prof%k_index(k))
-           frac_k = Prof%k_index(k) - k0
-
-           if ( k0 == 0 ) then
-             state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
-             state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
-             state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           else if (k0 == nk ) then
-             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
-             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
-             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
-             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           else
-             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
-             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
-             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-             state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
-             state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
-             state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-           end if
-
-
-           do i = 1, 8
-             if ( state_index( i ) < 0 ) then
-               write (UNIT=emsg_local, FMT='("state_index(",I1,") = ",I8," < 0 at &
-                       [ii,jj] = [",I5,",",I5,"] within [isc,iec] = [",I5,",",I5,"] &
-                       and [jsc,jec] = [",I5,",",I5,"], with halox = ",I5,", haloy = ",I5,", &
-                       k0 = ",I5,", blk = ",I5,", nk = ",I5)') &
-                       i, state_index( i ), ii, jj, isc, iec, jsc, jec, halox, haloy, k0, blk, nk
-               call error_mesg('ocean_da_core_mod::open_profile_dataset', trim(emsg_local), FATAL)
-             end if
-           end do
-
-           if ( frac_lon == 0.0 ) then
-             state_index(2) = state_index(1)
-             state_index(4) = state_index(3)
-             state_index(6) = state_index(5)
-             state_index(8) = state_index(7)
-           end if
-
-           if ( frac_lat == 0.0 ) then
-             state_index(3) = state_index(1)
-             state_index(4) = state_index(2)
-             state_index(7) = state_index(5)
-             state_index(8) = state_index(6)
-           end if
-
-           coef(5) = 1.0 - frac_k
-           coef(6) = frac_k
-
-           if ( frac_k == 0.0 ) then
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           end if
-
-           call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
-         end do
+!         !wfc calculate_fwd_op_ind_wts should replace the following code section.
+          call calculate_fwd_op_ind_wts("open_profile_dataset",Prof, i0, j0, lon_len, blk, ni,nk, isd, ied,jsd,jed)
+!         !wfc Uncomment when debugged.
+!         allocate(Prof%obs_def(Prof%levels))
+!         ii = i0; jj = j0
+!         frac_lat = Prof%j_index - jj
+!         frac_lon = Prof%i_index - ii
+!
+!         coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
+!         coef(2) = frac_lon * (1.0 - frac_lat)
+!         coef(3) = (1.0 - frac_lon) * frac_lat
+!         coef(4) = frac_lon * frac_lat
+!
+!         if ( ied > ni .and. ii < isd ) ii = ii + ni
+!         if ( isd < 1 .and. ii > ied ) ii = ii - ni
+!
+!         do k=1, Prof%levels
+!           k0 = floor(Prof%k_index(k))
+!           frac_k = Prof%k_index(k) - k0
+!
+!           if ( k0 == 0 ) then
+!             state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
+!             state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
+!             state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
+!             state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
+!             state_index(5) = state_index(1)
+!             state_index(6) = state_index(2)
+!             state_index(7) = state_index(3)
+!             state_index(8) = state_index(4)
+!           else if (k0 == nk ) then
+!             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
+!             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
+!             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
+!             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
+!             state_index(5) = state_index(1)
+!             state_index(6) = state_index(2)
+!             state_index(7) = state_index(3)
+!             state_index(8) = state_index(4)
+!           else
+!             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
+!             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
+!             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+!             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+!             state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
+!             state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
+!             state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+!             state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+!           end if
+!
+!
+!           do i = 1, 8
+!             if ( state_index( i ) < 0 ) then
+!               write (UNIT=emsg_local, FMT='("state_index(",I1,") = ",I8," < 0 at &
+!                       [ii,jj] = [",I5,",",I5,"] within [isc,iec] = [",I5,",",I5,"] &
+!                       and [jsc,jec] = [",I5,",",I5,"], with halox = ",I5,", haloy = ",I5,", &
+!                       k0 = ",I5,", blk = ",I5,", nk = ",I5)') &
+!                       i, state_index( i ), ii, jj, isc, iec, jsc, jec, halox, haloy, k0, blk, nk
+!               call error_mesg('ocean_da_core_mod::open_profile_dataset', trim(emsg_local), FATAL)
+!             end if
+!           end do
+!
+!           if ( frac_lon == 0.0 ) then
+!             state_index(2) = state_index(1)
+!             state_index(4) = state_index(3)
+!             state_index(6) = state_index(5)
+!             state_index(8) = state_index(7)
+!           end if
+!
+!           if ( frac_lat == 0.0 ) then
+!             state_index(3) = state_index(1)
+!             state_index(4) = state_index(2)
+!             state_index(7) = state_index(5)
+!             state_index(8) = state_index(6)
+!           end if
+!
+!           coef(5) = 1.0 - frac_k
+!           coef(6) = frac_k
+!
+!           if ( frac_k == 0.0 ) then
+!             state_index(5) = state_index(1)
+!             state_index(6) = state_index(2)
+!             state_index(7) = state_index(3)
+!             state_index(8) = state_index(4)
+!           end if
+!
+!           call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
+!         end do
+!            !wfc end of calculate_fwd_op_ind_wts should replace this code section.
        endif ! calculate forward operator indices and weights
+!End of common mask_depth_check code 
 
       !if ( var_id == TEMP_ID .and. profile_count > 0 ) call xbt_drop_rate_adjust(profiles(profile_count))
 
@@ -915,10 +872,11 @@ contains
        allocate(Prof%next) ! allocate next profile and link it to current one
        Prof%next%prev=>Prof
        Prof=>Prof%next
+       station_count = station_count + 1
     end do
 
     call mpp_sync_self()
-    call mpp_close(unit)
+    call close_file(fileobj)
   end subroutine open_profile_dataset
 
   subroutine open_argo_dataset(Profiles, Domain, T_grid, &
@@ -938,8 +896,8 @@ contains
     real :: lon, lat, time, rlink, var_type
     integer :: ni, nj, nk
     real :: ri0, rj0
-    real, dimension(MAX_LEVELS_FILE) :: depth, data
-    real, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: data_bfr, depth_bfr
+    real, dimension(MAX_LEVELS_FILE) :: depth, argo_data
+    real, dimension(MAX_LINKS, MAX_LEVELS_FILE) :: argo_data_bfr, depth_bfr
     type(ocean_profile_type), pointer :: Prof
 
     integer :: unit, ndim, nvar, natt, nstation, max_profiles
@@ -958,12 +916,8 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
+    type(FmsNetcdfDomainFile_t) :: fileobj
     type(time_type) :: obs_time, profile_time
-    type(axistype), pointer :: depth_axis, station_axis
-    type(axistype), allocatable, dimension(:), target :: axes
-    type(fieldtype), allocatable, dimension(:), target :: fields
-    type(fieldtype), pointer :: field_lon, field_lat, field_time, field_depth
-    type(fieldtype), pointer :: field_t, field_s, field_link, field_var_type
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
     integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
@@ -1002,67 +956,32 @@ contains
        var_id = obs_variable
     end if
 
-    call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
-    call mpp_get_info(unit, ndim, nvar, natt, nstation)
+    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+       ndim= get_num_dimensions(fileobj)
+       nvar= get_num_variables(fileobj)
+       write (UNIT=stdout_unit, FMT='("Opened argo dataset: ",A)') trim(filename)
+    else
+       call error_mesg('ocean_da_core_mod::open_argo_dataset', 'Cannot read '//trim(filename), FATAL)
+    endif
 
-    write (UNIT=stdout_unit, FMT='("Opened argo dataset: ",A)') trim(filename)
+    call get_dimension_size(fileobj,"depth_index",nlevs)
+    call get_dimension_size(fileobj,"station_index",nstation)
+
     if (nstation .EQ. 0) then
       write(UNIT=stdout_unit, FMT='("There are ZERO records in this dataset.")')
-      call mpp_close(unit)
+      call close_file(fileobj)
       return
     end if
 
-    ! get axis information
-    allocate(axes(ndim))
-    call mpp_get_axes(unit, axes)
-    do i=1, ndim
-       call mpp_get_atts(axes(i), name=axisname)
-       select case ( trim(axisname) )
-       case ('depth_index')
-          depth_axis => axes(i)
-       case ('station_index')
-          station_axis => axes(i)
-       end select
-    end do
-
-    ! get field information
-    allocate(fields(nvar))
-    call mpp_get_fields(unit, fields)
-    field_lon=>NULL();field_lat=>NULL();field_time=>NULL()
-    field_t=>NULL();field_s=>NULL();field_var_type=>NULL()
-    field_depth=>NULL();field_link=>NULL()
-    do i=1, nvar
-      call mpp_get_atts(fields(i), name=fldname)
-      select case (trim(fldname))
-      case ('longitude')
-        field_lon => fields(i)
-      case ('latitude')
-        field_lat => fields(i)
-      case ('var_type')
-        field_var_type => fields(i)
-      case ('time')
-        field_time => fields(i)
-      case ('temp')
-        field_t => fields(i)
-      case ('salt')
-        field_s => fields(i)
-      case ('depth')
-        field_depth => fields(i)
-      case ('link')
-        field_link => fields(i)
-      end select
-    end do
-
-    call mpp_get_atts(depth_axis, len=nlevs)
 
     if ( nlevs > MAX_LEVELS_FILE ) then
-       call error_mesg('ocean_da_core_mod::open_profile_dataset', 'increase parameter MAX_LEVELS_FILE', FATAL)
+       call error_mesg('ocean_da_core_mod::open_argo_dataset', 'increase parameter MAX_LEVELS_FILE', FATAL)
     else if (nlevs < 1) then
-       call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Value of nlevs is less than 1.', FATAL)
+       call error_mesg('ocean_da_core_mod::open_argo_dataset', 'Value of nlevs is less than 1.', FATAL)
     end if
 
-    if ( .NOT.ASSOCIATED(field_t) .and. .not. ASSOCIATED(field_s) ) then
-       call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+    if ( .NOT. variable_exists(fileobj, 'temp') .and. .NOT. variable_exists(fileobj, 'salt')  ) then 
+       call error_mesg('ocean_da_core_mod::open_argo_dataset',&
             & 'profile dataset not used because data not needed for Analysis', NOTE)
        return
     end if
@@ -1070,25 +989,103 @@ contains
     write(UNIT=stdout_unit, FMT='("There are ",I8," records in this dataset.")') nstation
     write(UNIT=stdout_unit, FMT='("Searching for profiles . . .")')
 
-    call mpp_get_atts(field_time, units=time_units)
+    call get_variable_attribute(fileobj, "time", "units", time_units)
 
     station_count = 1
     cont = .true.
 
     do while ( cont )
        depth = MISSING_VALUE  ! snz add
-       data = MISSING_VALUE   ! snz add
+       argo_data = MISSING_VALUE   ! snz add
 
-       call mpp_read(unit, field_lon, lon, tindex=station_count)
-       call mpp_read(unit, field_lat, lat, tindex=station_count)
-       call mpp_read(unit, field_time, time, tindex=station_count)
-       call mpp_read(unit, field_var_type, var_type, tindex=station_count)
+       call read_data(fileobj, "longitude", lon, unlim_dim_level=station_count)
+       call read_data(fileobj, "latitude", lat, unlim_dim_level=station_count)
+       call read_data(fileobj, "time", time, unlim_dim_level=station_count)
+       call read_data(fileobj, "var_type", var_type, unlim_dim_level=station_count)
+
+       !wfc Not sure if these need to be called here or later 
+       call read_data(fileobj, "depth", depth(1:nlevs), unlim_dim_level=station_count)
+       if ( var_id == TEMP_ID ) then
+         call read_data(fileobj, "temp", argo_data(1:nlevs), unlim_dim_level=station_count)
+       else if ( var_id == SALT_ID ) then
+         call read_data(fileobj, "salt", argo_data(1:nlevs), unlim_dim_level=station_count)
+       end if
+       call read_data(fileobj, "link", rlink, unlim_dim_level=station_count)
+       !wfc End of "to be called later?"
+       
        if (var_id==SALT_ID .and. var_type==1) then
           temp_count = temp_count + 1
           station_count = station_count + 1
           if ( station_count .gt. nstation ) cont = .false.
           cycle
        end if
+
+!wfc moved linked dataset read here
+       ! Flag the depth and argo_data values if one is invalid.
+       num_levs = 0
+       do k=1, MAX_LEVELS_FILE
+          flag(k) = .true.
+          if ( depth(k) > depth_cut ) depth(k) = MISSING_VALUE  ! snz add for rdat-hybn
+          if ( argo_data(k) .eq. MISSING_VALUE .or. depth(k) .eq. MISSING_VALUE) then
+             flag(k) = .false.
+          else
+             num_levs = num_levs + 1
+          end if
+       end do
+
+       ! If link above is one, then w have multiple profiles spread across records.
+       ! This was necessary in order to have the station index be "unlimited", but also have varying levels for the depth profile.
+       !
+       ! large profile are stored externally in separate records
+       ! read linked records and combine profile
+       station_link = station_count + 1
+       nlinks = 0
+       do while ( rlink > 0.0 )
+          nlinks = nlinks + 1
+
+          if ( nlinks > MAX_LINKS ) then
+             print *,'nlinks=',nlinks,'in ',filename
+             call error_mesg('ocean_da_core_mod::open_argo_dataset', 'increase parameter MAX_LINKS', FATAL)
+          end if
+
+          depth_bfr(nlinks,:) = MISSING_VALUE
+          argo_data_bfr(nlinks,:) = MISSING_VALUE
+          !All cores are reading the extra profile data. 
+          call read_data(fileobj, "depth", depth_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
+          if ( var_id == TEMP_ID ) then
+             call read_data(fileobj, "temp", argo_data_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
+          else if ( var_id == SALT_ID ) then
+             call read_data(fileobj, "salt", argo_data_bfr(nlinks,1:nlevs), unlim_dim_level=station_link)
+          end if
+          call read_data(fileobj, "link", rlink, unlim_dim_level=station_link)
+          station_link = station_link + 1
+       end do
+       station_count = station_link ! set record counter to start of next profile
+
+       ! Flag the depth and argo_data values if one is invalid.
+       if ( nlinks > 0 ) then
+          do nn=1, nlinks
+             do k=1, MAX_LEVELS_FILE
+                flag_bfr(nn,k) = .true.
+
+                if ( depth_bfr(nn,k) > depth_cut ) depth_bfr(nn,k) = MISSING_VALUE
+
+                if ( argo_data_bfr(nn,k) .eq. MISSING_VALUE .or. &
+                        depth_bfr(nn,k) .eq. MISSING_VALUE) then
+                   flag_bfr(nn,k) = .false.
+                else
+                   num_levs = num_levs+1
+                end if
+             end do
+          end do
+       end if
+
+       if ( num_levs == 0 ) then
+          station_count = station_count + 1
+          if ( station_count .gt. nstation ) cont = .false.
+          cycle
+       end if
+!wfc moved linked dataset read here
 
        data_is_local = .false.
        data_in_period = .false.
@@ -1097,12 +1094,14 @@ contains
        if ( lon .gt. 360.0 ) lon = lon - 360.0
        if ( lon .gt. 60.0 ) lon = lon - 360.0
 
+       ! If latitude or longitude are out of namelist bounds, there is nothing to do.
        if ( lat < obs_sbound(inst_type) .or. lat > obs_nbound(inst_type) ) then
          station_count = station_count + 1
          if ( station_count .gt. nstation ) cont = .false.
          cycle
        end if
 
+       ! If the profile time is out of model bounds, there is nothing to do.
        obs_time = get_cal_time(time, time_units, 'noleap')
        profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
@@ -1127,79 +1126,16 @@ contains
           cycle
        end if
 
+       ! Now the local core can work on adding this profile.
        profile_count = profile_count + 1
        !type_count(inst_type) = type_count(inst_type)+1
 
-       call mpp_read(unit, field_depth, depth(1:nlevs), tindex=station_count)
-       if ( var_id == TEMP_ID ) then
-         call mpp_read(unit, field_t, data(1:nlevs), tindex=station_count)
-       else if ( var_id == SALT_ID ) then
-         call mpp_read(unit, field_s, data(1:nlevs), tindex=station_count)
-       end if
-       call mpp_read(unit, field_link, rlink, tindex=station_count)
-
-       num_levs = 0
-       do k=1, MAX_LEVELS_FILE
-          flag(k) = .true.
-          if ( depth(k) > depth_cut ) depth(k) = MISSING_VALUE  ! snz add for rdat-hybn
-          if ( data(k) .eq. MISSING_VALUE .or. depth(k) .eq. MISSING_VALUE) then
-             flag(k) = .false.
-          else
-             num_levs = num_levs + 1
-          end if
-       end do
-
-       ! large profile are stored externally in separate records
-       ! read linked records and combine profile
-       station_link = station_count + 1
-       nlinks = 0
-       do while ( rlink > 0.0 )
-          nlinks = nlinks + 1
-
-          if ( nlinks > MAX_LINKS ) then
-             print *,'nlinks=',nlinks,'in ',filename
-             call error_mesg('ocean_da_core_mod::open_profile_dataset', 'increase parameter MAX_LINKS', FATAL)
-          end if
-
-          depth_bfr(nlinks,:) = MISSING_VALUE
-          data_bfr(nlinks,:) = MISSING_VALUE
-          call mpp_read(unit, field_depth, depth_bfr(nlinks,1:nlevs), tindex=station_link)
-          if ( var_id == TEMP_ID ) then
-             call mpp_read(unit, field_t, data_bfr(nlinks,1:nlevs), tindex=station_link)
-          else if ( var_id == SALT_ID ) then
-             call mpp_read(unit, field_s, data_bfr(nlinks,1:nlevs), tindex=station_link)
-          end if
-          call mpp_read(unit, field_link, rlink, tindex=station_link)
-          station_link = station_link + 1
-       end do
-       station_count = station_link ! set record counter to start of next profile
-
-       if ( nlinks > 0 ) then
-          do nn=1, nlinks
-             do k=1, MAX_LEVELS_FILE
-                flag_bfr(nn,k) = .true.
-
-                if ( depth_bfr(nn,k) > depth_cut ) depth_bfr(nn,k) = MISSING_VALUE
-
-                if ( data_bfr(nn,k) .eq. MISSING_VALUE .or. &
-                        depth_bfr(nn,k) .eq. MISSING_VALUE) then
-                   flag_bfr(nn,k) = .false.
-                else
-                   num_levs = num_levs+1
-                end if
-             end do
-          end do
-       end if
-
-       if ( num_levs == 0 ) then
-          if ( station_count .gt. nstation ) cont = .false.
-          cycle
-       end if
 
        ! allocate profile structure content and put in data
        allocate(Prof%depth(num_levs));Prof%depth(:)=MISSING_VALUE
        allocate(Prof%data(num_levs));Prof%data(:)=MISSING_VALUE
        allocate(Prof%flag(num_levs));Prof%flag(:)=.false.
+       Prof%profile_flag = station_count - 1
        Prof%variable = var_id
        Prof%inst_type = inst_type
        Prof%levels = num_levs
@@ -1222,11 +1158,11 @@ contains
        do k=1, MAX_LEVELS_FILE
           if ( flag(k) ) then
              if ( kk > Prof%levels ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+                call error_mesg('ocean_da_core_mod::open_argo_dataset',&
                      & 'Loop value "kk" is greater than profile levels', FATAL)
              end if
              Prof%depth(kk) = depth(k)
-             Prof%data(kk) = data(k)
+             Prof%data(kk) = argo_data(k)
              Prof%flag(kk) = flag(k)
              kk = kk + 1
           end if
@@ -1236,11 +1172,11 @@ contains
           do k=1, MAX_LEVELS_FILE
              if ( flag_bfr(nn,k) ) then
                 if ( kk > Prof%levels ) then
-                   call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+                   call error_mesg('ocean_da_core_mod::open_argo_dataset',&
                         & 'Loop value "kk" is greater than profile levels (bfr loop)', FATAL)
                 end if
                 Prof%depth(kk) = depth_bfr(nn,k)
-                Prof%data(kk) = data_bfr(nn,k)
+                Prof%data(kk) = argo_data_bfr(nn,k)
                 Prof%flag(kk) = flag_bfr(nn,k)
                 kk = kk + 1
              end if
@@ -1249,50 +1185,7 @@ contains
 
        Prof%time = profile_time
 
-       if ( lat < lat_bound ) then ! calculate interpolation coefficients
-          ri0 = frac_index(lon, T_grid%x(:,jsg))
-          rj0 = frac_index(lat, T_grid%y(isg,:))
-          i0 = floor(ri0)
-          j0 = floor(rj0)
-          if ( i0 > ieg .or. j0 > jeg ) then
-             write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
-             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                  & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
-          end if
-          Prof%i_index = ri0
-          Prof%j_index = rj0
-       else ! tripolar grids
-          lon_out(1,1) = lon*DEG_TO_RAD
-          lat_out(1,1) = lat*DEG_TO_RAD
-          call horiz_interp_bilinear_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
-               & lon_out, lat_out, new_search=.true., no_crash_when_not_found=.true.)
-
-          if ( Interp%wti(1,1,2) < 1.0 ) then
-             i0 = Interp%i_lon(1,1,1)
-          else
-             i0 = Interp%i_lon(1,1,2)
-          end if
-          if ( Interp%wtj(1,1,2) < 1.0 ) then
-             j0 = Interp%j_lat(1,1,1)
-          else
-             j0 = Interp%j_lat(1,1,2)
-          end if
-          if ( i0 > ieg .or. j0 > jeg ) then
-             write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
-             call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                  & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
-          end if
-          if ( Interp%wti(1,1,2) < 1.0 ) then
-             Prof%i_index =Interp%i_lon(1,1,1) + Interp%wti(1,1,2)
-          else
-             Prof%i_index =Interp%i_lon(1,1,2)
-          end if
-          if (Interp%wtj(1,1,2) < 1.0) then
-             Prof%j_index =Interp%j_lat(1,1,1) + Interp%wtj(1,1,2)
-          else
-             Prof%j_index =Interp%j_lat(1,1,2)
-          end if
-       end if ! interpolation coefficients
+       call calc_interp_coeffs("open_argo_dataset", Prof, lat, lon, T_grid, isg, ieg, jsg, jeg, i0, j0)
 
        Prof%accepted = .true.
 
@@ -1302,222 +1195,15 @@ contains
           Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
        end if
 
+!Start of common mask_depth_check code 
        if ( Prof%accepted ) then ! check surface land-sea mask and depth of ocean around profile location
-          if ( i0 /= ieg .and. j0 /= jeg ) then
-             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                  & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                  & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else if ( i0 == ieg .and. j0 /= jeg ) then
-             if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                  & T_grid%mask(1,j0,1) == 0.0 .or.&
-                  & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                  & T_grid%mask(1,j0+1,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(1,j0) < shelf_depth .or.&
-                  & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                  & T_grid%bathyT(1,j0+1) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else if ( i0 /= ieg .and. j0 == jeg ) then
-             if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                   & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          else
-             if ( T_grid%mask(i0,j0,1) == 0.0 ) then
-                Prof%accepted = .false.
-             end if
-             if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
-                Prof%accepted = .false.
-             end if
-          end if
-       end if ! check surface land-sea mask and depth of ocean
-
-       if ( Prof%accepted ) then ! determine vertical position and check mask at depth
-          allocate(Prof%k_index(Prof%levels))
-          do k=1, Prof%levels
-             Prof%k_index(k) = frac_index(Prof%depth(k), (/T_grid%z(i0,j0,:)/))
-             if ( Prof%k_index(k) < 1.0 ) then
-                if ( Prof%depth(k) < T_grid%z(i0,j0,1) ) then
-                   Prof%k_index(k) = 0.0
-                else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
-                    Prof%k_index(k) = real(nk)
-                    Prof%flag(k)=.false.
-                end if
-             end if
-             if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
-                if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
-                    Prof%flag(k)=.false.
-                end if
-             end if
-             if ( Prof%k_index(k) > real(nk) ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
-             else if ( Prof%k_index(k) < 0.0 ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
-             end if
-             k0 = floor(Prof%k_index(k))
-
-             if ( k0 >= 1 ) THEN ! snz add
-                if ( Prof%flag(k) ) then ! flag
-                   if ( i0 /= ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0+1,k0) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 == ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(1,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                           & T_grid%mask(1,j0+1,k0) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 /= ieg .and. j0 == jeg ) then
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else
-                      if ( T_grid%mask(i0,j0,k0) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   end if
-
-                   if ( i0 /= ieg .and. j0 /= jeg) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0+1,k0+1) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 == ieg .and. j0 /= jeg ) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(1,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                           & T_grid%mask(1,j0+1,k0+1) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else if ( i0 /= ieg .and. j0 == jeg ) then
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                           & T_grid%mask(i0+1,j0,k0+1) == 0.0) then
-                         Prof%flag(k) = .false.
-                      end if
-                   else
-                      if ( T_grid%mask(i0,j0,k0+1) == 0.0 ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   end if
-
-                   if ( Prof%data(k) == MISSING_VALUE &
-                           .or. Prof%depth(k) == MISSING_VALUE ) then
-                      Prof%flag(k) = .false.
-                   end if
-                end if ! flag
-             end if ! snz add
-          end do
+          call check_mask_depth_shelf("open_argo_dataset", Prof, T_grid, i0, j0, ieg, jeg, nk)
        end if ! determine vertical position and check mask at depth
 
        if ( Prof%accepted ) then ! calculate forward operator indices and weights
-         allocate(Prof%obs_def(Prof%levels))
-         ii = i0; jj = j0
-         frac_lat = Prof%j_index - jj
-         frac_lon = Prof%i_index - ii
-
-         coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
-         coef(2) = frac_lon * (1.0 - frac_lat)
-         coef(3) = (1.0 - frac_lon) * frac_lat
-         coef(4) = frac_lon * frac_lat
-
-         if ( ied > ni .and. ii < isd ) ii = ii + ni
-         if ( isd < 1 .and. ii > ied ) ii = ii - ni
-
-         do k=1, Prof%levels
-           k0 = floor(Prof%k_index(k))
-           frac_k = Prof%k_index(k) - k0
-
-           if ( k0 == 0 ) then
-             state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
-             state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
-             state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           else if (k0 == nk ) then
-             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
-             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
-             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
-             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           else
-             state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
-             state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
-             state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-             state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
-             state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
-             state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-             state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-           end if
-
-
-           do i = 1, 8
-             if ( state_index( i ) < 0 ) then
-               write (UNIT=emsg_local, FMT='("state_index(",I1,") = ",I8," < 0 at &
-                       [ii,jj] = [",I5,",",I5,"] within [isc,iec] = [",I5,",",I5,"] &
-                       and [jsc,jec] = [",I5,",",I5,"], with halox = ",I5,", haloy = ",I5,", &
-                       k0 = ",I5,", blk = ",I5,", nk = ",I5)') &
-                       i, state_index( i ), ii, jj, isc, iec, jsc, jec, halox, haloy, k0, blk, nk
-               call error_mesg('ocean_da_core_mod::open_profile_dataset', trim(emsg_local), FATAL)
-             end if
-           end do
-
-           if ( frac_lon == 0.0 ) then
-             state_index(2) = state_index(1)
-             state_index(4) = state_index(3)
-             state_index(6) = state_index(5)
-             state_index(8) = state_index(7)
-           end if
-
-           if ( frac_lat == 0.0 ) then
-             state_index(3) = state_index(1)
-             state_index(4) = state_index(2)
-             state_index(7) = state_index(5)
-             state_index(8) = state_index(6)
-           end if
-
-           coef(5) = 1.0 - frac_k
-           coef(6) = frac_k
-
-           if ( frac_k == 0.0 ) then
-             state_index(5) = state_index(1)
-             state_index(6) = state_index(2)
-             state_index(7) = state_index(3)
-             state_index(8) = state_index(4)
-           end if
-
-           call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
-         end do
+             call calculate_fwd_op_ind_wts("open_argo_dataset",Prof, i0, j0, lon_len, blk, ni,nk, isd, ied,jsd,jed)
        endif ! calculate forward operator indices and weights
+!End of common mask_depth_check code 
 
       !if ( var_id == TEMP_ID .and. profile_count > 0 ) call xbt_drop_rate_adjust(profiles(profile_count))
 
@@ -1525,10 +1211,12 @@ contains
        allocate(Prof%next) ! allocate next profile and link it to current one
        Prof%next%prev=>Prof
        Prof=>Prof%next
+       station_count = station_count + 1 ! Need to increment the station_count for the cores that just calculatedd data.
     end do
 
     call mpp_sync_self()
-    call mpp_close(unit)
+    call close_file(fileobj)
+    
   end subroutine open_argo_dataset
 
   subroutine open_oisst_dataset(Profiles, Domain, T_grid, &
@@ -1565,15 +1253,11 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
+    type(FmsNetcdfDomainFile_t) :: fileobj
     type(time_type) :: surface_time, obs_time
-    type(axistype), pointer :: lon_axis, lat_axis, time_axis
-    type(axistype), allocatable, dimension(:), target :: axes
-    type(fieldtype), allocatable, dimension(:), target :: fields
-    type(fieldtype), pointer :: field_sst
 
     real, allocatable, dimension(:) :: lons, lats, times
     real, allocatable, dimension(:,:) :: sfc_obs
-    integer :: sfc_size(3)
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
     integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
@@ -1608,51 +1292,27 @@ contains
     inst_type = ODA_OISST
     var_id = obs_variable
 
-    call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
-    call mpp_get_info(unit, ndim, nvar, natt, ntime)
+    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+       ndim= get_num_dimensions(fileobj)
+       nvar= get_num_variables(fileobj)
+       write (UNIT=stdout_unit, FMT='("Opened surface dataset: ",A)') trim(filename)
+    else
+       call error_mesg('ocean_da_core_mod::open_oisst_dataset', 'Cannot read '//trim(filename), FATAL)
+    endif
+    call get_dimension_size(fileobj,"lon",nlon)
+    call get_dimension_size(fileobj,"lat",nlat)
+    call get_dimension_size(fileobj,"time",ntime)
 
-    write (UNIT=stdout_unit, FMT='("Opened surface dataset: ",A)') trim(filename)
 
     ! get axis information
-    allocate(axes(ndim))
-    call mpp_get_axes(unit, axes)
-    do i=1, ndim
-       call mpp_get_atts(axes(i), name=axisname)
-       select case ( trim(axisname) )
-       case ('lon')
-          lon_axis => axes(i)
-       case ('lat')
-          lat_axis => axes(i)
-       case ('time')
-          time_axis => axes(i)
-       end select
-    end do
-
-    call mpp_get_atts(lon_axis,len=nlon)
-    call mpp_get_atts(lat_axis,len=nlat)
-    call mpp_get_atts(time_axis,len=ntime)
-    call mpp_get_atts(time_axis, units=time_units)
+    call get_variable_attribute(fileobj,"time","units",time_units)
 
     allocate(lons(nlon), lats(nlat), times(ntime))
     allocate(sfc_obs(nlon,nlat))
 
-    call mpp_get_axis_data(lon_axis, lons)
-    call mpp_get_axis_data(lat_axis, lats)
-    call mpp_get_times(unit, times)
-
-    ! get field information
-    allocate(fields(nvar))
-    call mpp_get_fields(unit, fields)
-    field_sst=>NULL()
-    do i=1, nvar
-      call mpp_get_atts(fields(i), name=fldname)
-      select case (trim(fldname))
-      case ('sst')
-        field_sst => fields(i)
-      end select
-    end do
-
-    call mpp_get_atts(field_sst, siz=sfc_size)
+    call read_data(fileobj, "lon", lons)
+    call read_data(fileobj, "lat", lats)
+    call read_data(fileobj, "time", times)
     write(UNIT=stdout_unit, FMT='("Searching for surface obs . . .")')
 
     num_levs = 1
@@ -1666,7 +1326,7 @@ contains
       if ( surface_time >= time_start .and. surface_time <= time_end ) data_in_period = .true.
       if ( .not. data_in_period ) cycle
 
-      call mpp_read(unit, field_sst, sfc_obs, tindex=k)
+      call read_data(fileobj, "sst", sfc_obs, unlim_dim_level=k)
       do j=1, nlat
         do i=1, nlon
           lon = lons(i)
@@ -1722,50 +1382,7 @@ contains
 
           if ( data .lt. sst_vimpact_temp ) Prof%impact_levels = sst_vimpact_levels
 
-          if ( lat < lat_bound ) then ! calculate interpolation coefficients
-             ri0 = frac_index(lon, T_grid%x(:,jsg))
-             rj0 = frac_index(lat, T_grid%y(isg,:))
-             i0 = floor(ri0)
-             j0 = floor(rj0)
-             if ( i0 > ieg .or. j0 > jeg ) then
-                write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                     & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
-             end if
-             Prof%i_index = ri0
-             Prof%j_index = rj0
-          else ! tripolar grids
-             lon_out(1,1) = lon*DEG_TO_RAD
-             lat_out(1,1) = lat*DEG_TO_RAD
-             call horiz_interp_bilinear_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
-                  & lon_out, lat_out, new_search=.true., no_crash_when_not_found=.true.)
-
-             if ( Interp%wti(1,1,2) < 1.0 ) then
-                i0 = Interp%i_lon(1,1,1)
-             else
-                i0 = Interp%i_lon(1,1,2)
-             end if
-             if ( Interp%wtj(1,1,2) < 1.0 ) then
-                j0 = Interp%j_lat(1,1,1)
-             else
-                j0 = Interp%j_lat(1,1,2)
-             end if
-             if ( i0 > ieg .or. j0 > jeg ) then
-                write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                     & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
-             end if
-             if ( Interp%wti(1,1,2) < 1.0 ) then
-                Prof%i_index =Interp%i_lon(1,1,1) + Interp%wti(1,1,2)
-             else
-                Prof%i_index =Interp%i_lon(1,1,2)
-             end if
-             if (Interp%wtj(1,1,2) < 1.0) then
-                Prof%j_index =Interp%j_lat(1,1,1) + Interp%wtj(1,1,2)
-             else
-                Prof%j_index =Interp%j_lat(1,1,2)
-             end if
-          end if ! interpolation coefficients
+       call calc_interp_coeffs("open_oisst_dataset", Prof, lat, lon, T_grid, isg, ieg, jsg, jeg, i0, j0)
 
           Prof%accepted = .true.
 
@@ -1775,6 +1392,7 @@ contains
              Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
           end if
 
+!Start of common mask_depth_check code but this does not check shelf_depth!
           if ( Prof%accepted ) then ! check surface land-sea mask
              if ( i0 /= ieg .and. j0 /= jeg ) then
                 if (T_grid%mask(i0,j0,1) == 0.0 .or.&
@@ -1800,7 +1418,7 @@ contains
                 end if
              end if
           end if ! check surface land-sea mask
-   
+!Nope, this section of code is not common!!   
           if ( Prof%accepted ) then ! determine vertical position and check mask at depth
              allocate(Prof%k_index(Prof%levels))
              do kk=1, Prof%levels
@@ -1808,80 +1426,12 @@ contains
              end do
           end if ! determine vertical position and check mask at depth
    
+!Start of common mask_depth_check code 
+
           if ( Prof%accepted ) then ! calculate forward operator indices and weights
-            allocate(Prof%obs_def(Prof%levels))
-            ii = i0; jj = j0
-            frac_lat = Prof%j_index - jj
-            frac_lon = Prof%i_index - ii
-   
-            coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
-            coef(2) = frac_lon * (1.0 - frac_lat)
-            coef(3) = (1.0 - frac_lon) * frac_lat
-            coef(4) = frac_lon * frac_lat
-   
-            if ( ied > ni .and. ii < isd ) ii = ii + ni
-            if ( isd < 1 .and. ii > ied ) ii = ii - ni
-   
-            do kk=1, Prof%levels
-              k0 = floor(Prof%k_index(kk))
-              frac_k = Prof%k_index(kk) - k0
-   
-              if ( k0 == 0 ) then
-                state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
-                state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
-                state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              else if (k0 == nk ) then
-                state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
-                state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
-                state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
-                state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              else
-                state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
-                state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
-                state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-                state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
-                state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
-                state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-              end if
-   
-              if ( frac_lon == 0.0 ) then
-                state_index(2) = state_index(1)
-                state_index(4) = state_index(3)
-                state_index(6) = state_index(5)
-                state_index(8) = state_index(7)
-              end if
-   
-              if ( frac_lat == 0.0 ) then
-                state_index(3) = state_index(1)
-                state_index(4) = state_index(2)
-                state_index(7) = state_index(5)
-                state_index(8) = state_index(6)
-              end if
-   
-              coef(5) = 1.0 - frac_k
-              coef(6) = frac_k
-   
-              if ( frac_k == 0.0 ) then
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              end if
-   
-              call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(kk))
-            end do
+             call calculate_fwd_op_ind_wts("open_oisst_dataset",Prof, i0, j0, lon_len, blk, ni,nk, isd, ied,jsd,jed)
           endif ! calculate forward operator indices and weights
+!End of common mask_depth_check code 
    
           allocate(Prof%next) ! allocate next profile and link it to current one
           Prof%next%prev=>Prof
@@ -1891,7 +1441,8 @@ contains
     end do
 
     call mpp_sync_self()
-    call mpp_close(unit)
+    call close_file(fileobj)
+    
   end subroutine open_oisst_dataset
 
   subroutine open_mooring_dataset(Profiles, Domain, T_grid, &
@@ -1928,15 +1479,12 @@ contains
     character(len=32) :: fldname, axisname, time_units
     character(len=138) :: emsg_local
 
+    type(FmsNetcdfDomainFile_t) :: fileobj
     type(time_type) :: mooring_time, obs_time
-    type(axistype), pointer :: lon_axis, lat_axis, time_axis, depth_axis
-    type(axistype), allocatable, dimension(:), target :: axes
-    type(fieldtype), allocatable, dimension(:), target :: fields
-    type(fieldtype), pointer :: field_t, field_quality
+    real,            allocatable, dimension(:) :: lon_axis, lat_axis, time_axis, depth_axis
 
     real, allocatable, dimension(:) :: lons, lats, depths, times
     real, allocatable, dimension(:,:,:,:) :: mooring_obs, mooring_quality
-    integer :: mooring_size(4)
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
     integer :: isg, ieg, jsg, jeg, halox, haloy, lon_len, blk
@@ -1971,33 +1519,25 @@ contains
     inst_type = ODA_MRB
     var_id = obs_variable
 
-    call mpp_open(unit, filename, form=MPP_NETCDF, fileset=MPP_SINGLE, threading=MPP_MULTI, action=MPP_RDONLY)
-    call mpp_get_info(unit, ndim, nvar, natt, ntime)
+    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+       ndim= get_num_dimensions(fileobj)
+       nvar= get_num_variables(fileobj)
+       write (UNIT=stdout_unit, FMT='("Opened mooring dataset: ",A)') trim(filename)
+    else
+       call error_mesg('ocean_da_core_mod::open_mooring_dataset', 'Cannot read '//trim(filename), FATAL)
+    endif
+    call get_dimension_size(fileobj,"lon",nlon)
+    allocate(lon_axis(nlon))
+    call get_dimension_size(fileobj,"lat",nlat)
+    allocate(lat_axis(nlat))
+    call get_dimension_size(fileobj,"depth",ndepth)
+    allocate(depth_axis(ndepth))
+    call get_dimension_size(fileobj,"time",ntime)
+    allocate(time_axis(ntime))
 
-    write (UNIT=stdout_unit, FMT='("Opened mooring dataset: ",A)') trim(filename)
 
     ! get axis information
-    allocate(axes(ndim))
-    call mpp_get_axes(unit, axes)
-    do i=1, ndim
-       call mpp_get_atts(axes(i), name=axisname)
-       select case ( trim(axisname) )
-       case ('lon')
-          lon_axis => axes(i)
-       case ('lat')
-          lat_axis => axes(i)
-       case ('depth')
-          depth_axis => axes(i)
-       case ('time')
-          time_axis => axes(i)
-       end select
-    end do
-
-    call mpp_get_atts(lon_axis,len=nlon)
-    call mpp_get_atts(lat_axis,len=nlat)
-    call mpp_get_atts(depth_axis,len=ndepth)
-    call mpp_get_atts(time_axis,len=ntime)
-    call mpp_get_atts(time_axis, units=time_units)
+    call get_variable_attribute(fileobj,"time","units",time_units)
 
     allocate(lons(nlon), lats(nlat), depths(ndepth), times(ntime))
     allocate(mooring_obs(ntime,ndepth,nlat,nlon))
@@ -2005,30 +1545,17 @@ contains
     allocate(data(ndepth),quality(ndepth))
     allocate(flag(ndepth))
 
-    call mpp_get_axis_data(lon_axis, lons)
-    call mpp_get_axis_data(lat_axis, lats)
-    call mpp_get_axis_data(depth_axis, depths)
-    call mpp_get_axis_data(time_axis, times)
+    call read_data(fileobj, "lon", lons)
+    call read_data(fileobj, "lat", lats)
+    call read_data(fileobj, "depth", depths)
+    call read_data(fileobj, "time", times)
 
     ! get field information
-    allocate(fields(nvar))
-    call mpp_get_fields(unit, fields)
-    field_t=>NULL()
-    do i=1, nvar
-      call mpp_get_atts(fields(i), name=fldname)
-      select case (trim(fldname))
-      case ('T_20')
-        field_t => fields(i)
-      case ('QT_5020')
-        field_quality => fields(i)
-      end select
-    end do
 
-    call mpp_get_atts(field_t, siz=mooring_size)
     write(UNIT=stdout_unit, FMT='("Searching for mooring obs . . .")')
 
-    call mpp_read(unit, field_t, mooring_obs)
-    call mpp_read(unit, field_quality, mooring_quality)
+    call read_data(fileobj, "T_20", mooring_obs)
+    call read_data(fileobj, "QT_5020", mooring_quality)
     do t1=1, ntime
       data_in_period = .false.
       time = times(t1)
@@ -2100,7 +1627,7 @@ contains
           do k=1, ndepth
              if ( flag(k) ) then
                if ( kk > Prof%levels ) then
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
+                call error_mesg('ocean_da_core_mod::open_mooring_dataset',&
                      & 'Loop value "kk" is greater than profile levels', FATAL)
                end if
                Prof%depth(kk) = depths(k)
@@ -2110,50 +1637,7 @@ contains
              end if
           end do
 
-          if ( lat < lat_bound ) then ! calculate interpolation coefficients
-             ri0 = frac_index(lon, T_grid%x(:,jsg))
-             rj0 = frac_index(lat, T_grid%y(isg,:))
-             i0 = floor(ri0)
-             j0 = floor(rj0)
-             if ( i0 > ieg .or. j0 > jeg ) then
-                write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                     & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
-             end if
-             Prof%i_index = ri0
-             Prof%j_index = rj0
-          else ! tripolar grids
-             lon_out(1,1) = lon*DEG_TO_RAD
-             lat_out(1,1) = lat*DEG_TO_RAD
-             call horiz_interp_bilinear_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
-                  & lon_out, lat_out, new_search=.true., no_crash_when_not_found=.true.)
-
-             if ( Interp%wti(1,1,2) < 1.0 ) then
-                i0 = Interp%i_lon(1,1,1)
-             else
-                i0 = Interp%i_lon(1,1,2)
-             end if
-             if ( Interp%wtj(1,1,2) < 1.0 ) then
-                j0 = Interp%j_lat(1,1,1)
-             else
-                j0 = Interp%j_lat(1,1,2)
-             end if
-             if ( i0 > ieg .or. j0 > jeg ) then
-                write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
-                call error_mesg('ocean_da_core_mod::open_profile_dataset',&
-                     & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
-             end if
-             if ( Interp%wti(1,1,2) < 1.0 ) then
-                Prof%i_index =Interp%i_lon(1,1,1) + Interp%wti(1,1,2)
-             else
-                Prof%i_index =Interp%i_lon(1,1,2)
-             end if
-             if (Interp%wtj(1,1,2) < 1.0) then
-                Prof%j_index =Interp%j_lat(1,1,1) + Interp%wtj(1,1,2)
-             else
-                Prof%j_index =Interp%j_lat(1,1,2)
-             end if
-          end if ! interpolation coefficients
+       call calc_interp_coeffs("open_mooring_dataset", Prof, lat, lon, T_grid, isg, ieg, jsg, jeg, i0, j0)
 
           Prof%accepted = .true.
 
@@ -2163,209 +1647,14 @@ contains
              Prof%basin_mask = T_grid%basin_mask(lon1d(inds(1)),lat1d(inds(1)))
           end if
 
+!Start of common mask_depth_check code ?
           if ( Prof%accepted ) then ! check surface land-sea mask and depth of ocean around profile location
-             if ( i0 /= ieg .and. j0 /= jeg ) then
-                if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                     & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
-                     & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                     & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
-                   Prof%accepted = .false.
-                end if
-                if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                     & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
-                     & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                     & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
-                   Prof%accepted = .false.
-                end if
-             else if ( i0 == ieg .and. j0 /= jeg ) then
-                if (T_grid%mask(i0,j0,1) == 0.0 .or.&
-                     & T_grid%mask(1,j0,1) == 0.0 .or.&
-                     & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
-                     & T_grid%mask(1,j0+1,1) == 0.0 ) then
-                   Prof%accepted = .false.
-                end if
-                if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                     & T_grid%bathyT(1,j0) < shelf_depth .or.&
-                     & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
-                     & T_grid%bathyT(1,j0+1) < shelf_depth ) then
-                   Prof%accepted = .false.
-                end if
-             else if ( i0 /= ieg .and. j0 == jeg ) then
-                if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
-                   Prof%accepted = .false.
-                end if
-                if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
-                      & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
-                   Prof%accepted = .false.
-                end if
-             else
-                if ( T_grid%mask(i0,j0,1) == 0.0 ) then
-                   Prof%accepted = .false.
-                end if
-                if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
-                   Prof%accepted = .false.
-                end if
-             end if
-          end if ! check surface land-sea mask and depth of ocean
-   
-          if ( Prof%accepted ) then ! determine vertical position and check mask at depth
-             allocate(Prof%k_index(Prof%levels))
-             do k=1, Prof%levels
-                Prof%k_index(k) = frac_index(Prof%depth(k), (/T_grid%z(i0,j0,:)/))
-                if ( Prof%k_index(k) < 1.0 ) then
-                   if ( Prof%depth(k) < T_grid%z(i0,j0,1) ) then
-                      Prof%k_index(k) = 0.0
-                   else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
-                       Prof%k_index(k) = real(nk)
-                       Prof%flag(k)=.false.
-                   end if
-                end if
-                if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
-                   if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
-                       Prof%flag(k)=.false.
-                   end if
-                end if
-                if ( Prof%k_index(k) > real(nk) ) then
-                   call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is greater than nk', FATAL)
-                else if ( Prof%k_index(k) < 0.0 ) then
-                   call error_mesg('ocean_da_core_mod::open_profile_dataset', 'Profile k_index is less than 0', FATAL)
-                end if
-                k0 = floor(Prof%k_index(k))
-   
-                if ( k0 >= 1 ) THEN ! snz add
-                   if ( Prof%flag(k) ) then ! flag
-                      if ( i0 /= ieg .and. j0 /= jeg ) then
-                         if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0,k0) == 0.0 .or.&
-                              & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0+1,k0) == 0.0 ) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else if ( i0 == ieg .and. j0 /= jeg ) then
-                         if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                              & T_grid%mask(1,j0,k0) == 0.0 .or.&
-                              & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
-                              & T_grid%mask(1,j0+1,k0) == 0.0) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else if ( i0 /= ieg .and. j0 == jeg ) then
-                         if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0,k0) == 0.0) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else
-                         if ( T_grid%mask(i0,j0,k0) == 0.0 ) then
-                            Prof%flag(k) = .false.
-                         end if
-                      end if
-   
-                      if ( i0 /= ieg .and. j0 /= jeg) then
-                         if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0,k0+1) == 0.0 .or.&
-                              & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0+1,k0+1) == 0.0 ) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else if ( i0 == ieg .and. j0 /= jeg ) then
-                         if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                              & T_grid%mask(1,j0,k0+1) == 0.0 .or.&
-                              & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
-                              & T_grid%mask(1,j0+1,k0+1) == 0.0) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else if ( i0 /= ieg .and. j0 == jeg ) then
-                         if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
-                              & T_grid%mask(i0+1,j0,k0+1) == 0.0) then
-                            Prof%flag(k) = .false.
-                         end if
-                      else
-                         if ( T_grid%mask(i0,j0,k0+1) == 0.0 ) then
-                            Prof%flag(k) = .false.
-                         end if
-                      end if
-   
-                      if ( Prof%data(k) == MISSING_VALUE &
-                              .or. Prof%depth(k) == MISSING_VALUE ) then
-                         Prof%flag(k) = .false.
-                      end if
-                   end if ! flag
-                end if ! snz add
-             end do
+             call check_mask_depth_shelf("open_mooring_dataset", Prof, T_grid, i0, j0, ieg, jeg, nk)
           end if ! determine vertical position and check mask at depth
    
           if ( Prof%accepted ) then ! calculate forward operator indices and weights
-            allocate(Prof%obs_def(Prof%levels))
-            ii = i0; jj = j0
-            frac_lat = Prof%j_index - jj
-            frac_lon = Prof%i_index - ii
-   
-            coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
-            coef(2) = frac_lon * (1.0 - frac_lat)
-            coef(3) = (1.0 - frac_lon) * frac_lat
-            coef(4) = frac_lon * frac_lat
-   
-            if ( ied > ni .and. ii < isd ) ii = ii + ni
-            if ( isd < 1 .and. ii > ied ) ii = ii - ni
-   
-            do k=1, Prof%levels
-              k0 = floor(Prof%k_index(k))
-              frac_k = Prof%k_index(k) - k0
-   
-              if ( k0 == 0 ) then
-                state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
-                state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
-                state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              else if (k0 == nk ) then
-                state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
-                state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
-                state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
-                state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              else
-                state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
-                state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
-                state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-                state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
-                state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
-                state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
-                state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
-              end if
-  
-              if ( frac_lon == 0.0 ) then
-                state_index(2) = state_index(1)
-                state_index(4) = state_index(3)
-                state_index(6) = state_index(5)
-                state_index(8) = state_index(7)
-              end if
-   
-              if ( frac_lat == 0.0 ) then
-                state_index(3) = state_index(1)
-                state_index(4) = state_index(2)
-                state_index(7) = state_index(5)
-                state_index(8) = state_index(6)
-              end if
-   
-              coef(5) = 1.0 - frac_k
-              coef(6) = frac_k
-   
-              if ( frac_k == 0.0 ) then
-                state_index(5) = state_index(1)
-                state_index(6) = state_index(2)
-                state_index(7) = state_index(3)
-                state_index(8) = state_index(4)
-              end if
-   
-              call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
-            end do
+!            !wfc calculate_fwd_op_ind_wts should replace the following code section.
+             call calculate_fwd_op_ind_wts("open_mooring_dataset",Prof, i0, j0, lon_len, blk, ni,nk, isd, ied,jsd,jed)
           endif ! calculate forward operator indices and weights
 
           allocate(Prof%next) ! allocate next profile and link it to current one
@@ -2376,7 +1665,7 @@ contains
     end do
 
     call mpp_sync_self()
-    call mpp_close(unit)
+    call close_file(fileobj)
   end subroutine open_mooring_dataset
 
   ! get profiles obs relevant to current analysis interval
@@ -2436,6 +1725,105 @@ contains
     return
   end subroutine get_profiles
 
+
+  subroutine calculate_fwd_op_ind_wts(caller_routine,Prof, i0, j0, lon_len, blk, ni, nk, isd, ied, jsd, jed)
+  
+    character(len=*),                 intent(in)    :: caller_routine
+    type(ocean_profile_type), pointer, intent(inout) :: Prof
+    integer , intent(in)  :: i0, j0, lon_len, blk, ni, nk, isd, ied, jsd, jed
+
+    integer :: ii, jj, k0, i, k
+    real :: frac_lon, frac_lat, frac_k
+    real, dimension(6) :: coef
+    integer, dimension(8) :: state_index
+    character(len=138) :: emsg_local
+
+    allocate(Prof%obs_def(Prof%levels))
+    ii = i0; jj = j0
+    frac_lat = Prof%j_index - jj
+    frac_lon = Prof%i_index - ii
+  
+    coef(1) = (1.0 - frac_lon) * (1.0 - frac_lat)
+    coef(2) = frac_lon * (1.0 - frac_lat)
+    coef(3) = (1.0 - frac_lon) * frac_lat
+    coef(4) = frac_lon * frac_lat
+  
+    if ( ied > ni .and. ii < isd ) ii = ii + ni
+    if ( isd < 1 .and. ii > ied ) ii = ii - ni
+  
+    do k=1, Prof%levels
+      k0 = floor(Prof%k_index(k))
+      frac_k = Prof%k_index(k) - k0
+  
+      if ( k0 == 0 ) then
+        state_index(1) = (jj-jsd)*lon_len + ii-isd + 1
+        state_index(2) = (jj-jsd)*lon_len + ii-isd + 2
+        state_index(3) = (jj-jsd+1)*lon_len + ii-isd + 1
+        state_index(4) = (jj-jsd+1)*lon_len + ii-isd + 2
+        state_index(5) = state_index(1)
+        state_index(6) = state_index(2)
+        state_index(7) = state_index(3)
+        state_index(8) = state_index(4)
+      else if (k0 == nk ) then
+        state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+1
+        state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len+ii-isd+2
+        state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+1
+        state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len+ii-isd+2
+        state_index(5) = state_index(1)
+        state_index(6) = state_index(2)
+        state_index(7) = state_index(3)
+        state_index(8) = state_index(4)
+      else
+        state_index(1) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 1
+        state_index(2) = (k0-1)*blk + (jj-jsd)*lon_len + ii-isd + 2
+        state_index(3) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+        state_index(4) = (k0-1)*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+        state_index(5) = k0*blk + (jj-jsd)*lon_len + ii-isd + 1
+        state_index(6) = k0*blk + (jj-jsd)*lon_len + ii-isd + 2
+        state_index(7) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 1
+        state_index(8) = k0*blk + (jj-jsd+1)*lon_len + ii-isd + 2
+      end if
+  
+      !do i = 1, 8
+      !  if ( state_index( i ) < 0 ) then
+      !    write (UNIT=emsg_local, FMT='("state_index(",I1,") = ",I8," < 0 at &
+      !            [ii,jj] = [",I5,",",I5,"] within [isc,iec] = [",I5,",",I5,"] &
+      !            and [jsc,jec] = [",I5,",",I5,"], with halox = ",I5,", haloy = ",I5,", &
+      !            k0 = ",I5,", blk = ",I5,", nk = ",I5)') &
+      !            i, state_index( i ), ii, jj, isc, iec, jsc, jec, halox, haloy, k0, blk, nk
+      !    call error_mesg('ocean_da_core_mod::'//trim(caller_routine), trim(emsg_local), FATAL)
+      !  end if
+      !end do
+
+      if ( frac_lon == 0.0 ) then
+        state_index(2) = state_index(1)
+        state_index(4) = state_index(3)
+        state_index(6) = state_index(5)
+        state_index(8) = state_index(7)
+      end if
+  
+      if ( frac_lat == 0.0 ) then
+        state_index(3) = state_index(1)
+        state_index(4) = state_index(2)
+        state_index(7) = state_index(5)
+        state_index(8) = state_index(6)
+      end if
+  
+      coef(5) = 1.0 - frac_k
+      coef(6) = frac_k
+  
+      if ( frac_k == 0.0 ) then
+        state_index(5) = state_index(1)
+        state_index(6) = state_index(2)
+        state_index(7) = state_index(3)
+        state_index(8) = state_index(4)
+      end if
+   
+      call def_forward_operator(8, state_index(1:8), coef(1:6), Prof%obs_def(k))
+    end do
+  end subroutine calculate_fwd_op_ind_wts
+
+
   !=======================================================================
   ! Puts FO interpolation coefficients and state variable indices into an FO_type data structure.
   subroutine def_forward_operator(num_state, state_ind, coef, obs_def)
@@ -2459,6 +1847,211 @@ contains
        obs_def%coef(i) = coef(i)
     end do
   end subroutine def_forward_operator
+
+
+! Create a subroutine for common code among the various open_dataset routines.
+  subroutine calc_interp_coeffs(caller_routine, Prof, lat, lon, T_grid, isg, ieg, jsg, jeg, i0, j0)
+    character(len=*),                 intent(in)    :: caller_routine
+    type(ocean_profile_type), pointer, intent(inout) :: Prof
+    real,                              intent(in)    :: lat, lon
+    type(grid_type),          pointer, intent(in)    :: T_grid !< MOM grid type for the local domain
+    integer,                           intent(in)    :: isg, ieg, jsg, jeg
+    integer,                           intent(out)   :: i0, j0
+
+    real :: lat_bound = 59.0
+    real :: lon_out(1, 1), lat_out(1, 1)
+    real :: ri0, rj0
+    character(len=138) :: emsg_local
+    type(horiz_interp_type) :: Interp
+    
+       call horiz_interp_init
+       if ( lat < lat_bound ) then ! calculate interpolation coefficients
+          ri0 = frac_index(lon, T_grid%x(:,jsg))
+          rj0 = frac_index(lat, T_grid%y(isg,:))
+          i0 = floor(ri0)
+          j0 = floor(rj0)
+          if ( i0 > ieg .or. j0 > jeg ) then
+             write (UNIT=emsg_local, FMT='("i0 = ",I8,", j0 = ",I8)') mpp_pe(), i0, j0
+             call error_mesg('ocean_da_core_mod::'//trim(caller_routine),&
+                  & 'For regular grids, either i0 > ieg or j0 > jeg.  '//trim(emsg_local), FATAL)
+          end if
+          Prof%i_index = ri0
+          Prof%j_index = rj0
+       else ! tripolar grids
+          lon_out(1,1) = lon*DEG_TO_RAD
+          lat_out(1,1) = lat*DEG_TO_RAD
+          call horiz_interp_new (Interp, T_grid%x*DEG_TO_RAD, T_grid%y*DEG_TO_RAD,&
+               & lon_out, lat_out, interp_method="bilinear", new_search=.true., no_crash_when_not_found=.true.)
+
+          if ( Interp%horizInterpReals8_type%wti(1,1,2) < 1.0 ) then
+             i0 = Interp%i_lon(1,1,1)
+          else
+             i0 = Interp%i_lon(1,1,2)
+          end if
+          if ( Interp%horizInterpReals8_type%wtj(1,1,2) < 1.0 ) then
+             j0 = Interp%j_lat(1,1,1)
+          else
+             j0 = Interp%j_lat(1,1,2)
+          end if
+          if ( i0 > ieg .or. j0 > jeg ) then
+             write (UNIT=emsg_local, FMT='("i0 = ",I6,", j0 = ",I6)') mpp_pe(), i0, j0
+             call error_mesg('ocean_da_core_mod::'//trim(caller_routine),&
+                  & 'For tripolar grids, either i0 > ieg or j0 > jeg', FATAL)
+          end if
+          if ( Interp%horizInterpReals8_type%wti(1,1,2) < 1.0 ) then
+             Prof%i_index =Interp%i_lon(1,1,1) + Interp%horizInterpReals8_type%wti(1,1,2)
+          else
+             Prof%i_index =Interp%i_lon(1,1,2)
+          end if
+          if (Interp%horizInterpReals8_type%wtj(1,1,2) < 1.0) then
+             Prof%j_index =Interp%j_lat(1,1,1) + Interp%horizInterpReals8_type%wtj(1,1,2)
+          else
+             Prof%j_index =Interp%j_lat(1,1,2)
+          end if
+          call horiz_interp_del(Interp)
+       end if ! interpolation coefficients
+
+  end subroutine calc_interp_coeffs
+
+
+  subroutine check_mask_depth_shelf(caller_routine, Prof, T_grid, i0, j0, ieg, jeg, nk)
+    character(len=*),                 intent(in)    :: caller_routine
+    type(ocean_profile_type), pointer, intent(inout) :: Prof
+    type(grid_type),          pointer, intent(in)    :: T_grid !< MOM grid type for the local domain
+    integer,                           intent(in)    :: i0, j0, ieg, jeg, nk
+
+    integer :: k ,k0
+    ! check surface land-sea mask and depth of ocean around profile location
+    if ( i0 /= ieg .and. j0 /= jeg ) then
+       if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+            & T_grid%mask(i0+1,j0,1) == 0.0 .or.&
+            & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+            & T_grid%mask(i0+1,j0+1,1) == 0.0 ) then
+          Prof%accepted = .false.
+       end if
+       if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+            & T_grid%bathyT(i0+1,j0) < shelf_depth .or.&
+            & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+            & T_grid%bathyT(i0+1,j0+1) < shelf_depth ) then
+          Prof%accepted = .false.
+       end if
+    else if ( i0 == ieg .and. j0 /= jeg ) then
+       if (T_grid%mask(i0,j0,1) == 0.0 .or.&
+            & T_grid%mask(1,j0,1) == 0.0 .or.&
+            & T_grid%mask(i0,j0+1,1) == 0.0 .or.&
+            & T_grid%mask(1,j0+1,1) == 0.0 ) then
+          Prof%accepted = .false.
+       end if
+       if (T_grid%bathyT(i0,j0) < shelf_depth .or.&
+            & T_grid%bathyT(1,j0) < shelf_depth .or.&
+            & T_grid%bathyT(i0,j0+1) < shelf_depth .or.&
+            & T_grid%bathyT(1,j0+1) < shelf_depth ) then
+          Prof%accepted = .false.
+       end if
+    else if ( i0 /= ieg .and. j0 == jeg ) then
+       if ( T_grid%mask(i0,j0,1) == 0.0 .or. T_grid%mask(i0+1,j0,1) == 0.0 ) then
+          Prof%accepted = .false.
+       end if
+       if ( T_grid%bathyT(i0,j0) < shelf_depth .or.&
+             & T_grid%bathyT(i0+1,j0) < shelf_depth ) then
+          Prof%accepted = .false.
+       end if
+    else
+       if ( T_grid%mask(i0,j0,1) == 0.0 ) then
+          Prof%accepted = .false.
+       end if
+       if ( T_grid%bathyT(i0,j0) < shelf_depth ) then
+          Prof%accepted = .false.
+       end if
+    end if
+    
+    if( .not. Prof%accepted) return
+   
+    if ( Prof%accepted ) then ! determine vertical position and check mask at depth
+       allocate(Prof%k_index(Prof%levels))
+       do k=1, Prof%levels
+          Prof%k_index(k) = frac_index(Prof%depth(k), (/T_grid%z(i0,j0,:)/))
+          if ( Prof%k_index(k) < 1.0 ) then
+             if ( Prof%depth(k) < T_grid%z(i0,j0,1) ) then
+                Prof%k_index(k) = 0.0
+             else if ( Prof%depth(k) > T_grid%z(i0,j0,nk) ) then
+                 Prof%k_index(k) = real(nk)
+                 Prof%flag(k)=.false.
+             end if
+          end if
+          if ( k > 3 ) then ! thinning the profile observations to a maximum of 3 within each layer
+             if (floor(Prof%k_index(k)) == floor(Prof%k_index(k-3))) then
+                 Prof%flag(k)=.false.
+             end if
+          end if
+          if ( Prof%k_index(k) > real(nk) ) then
+             call error_mesg('ocean_da_core_mod::open_mooring_dataset', 'Profile k_index is greater than nk', FATAL)
+          else if ( Prof%k_index(k) < 0.0 ) then
+             call error_mesg('ocean_da_core_mod::open_mooring_dataset', 'Profile k_index is less than 0', FATAL)
+          end if
+          k0 = floor(Prof%k_index(k))
+   
+          if ( k0 >= 1 ) THEN ! snz add
+             if ( Prof%flag(k) ) then ! flag
+                if ( i0 /= ieg .and. j0 /= jeg ) then
+                   if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0,k0) == 0.0 .or.&
+                        & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0+1,k0) == 0.0 ) then
+                      Prof%flag(k) = .false.
+                   end if
+                else if ( i0 == ieg .and. j0 /= jeg ) then
+                   if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+                        & T_grid%mask(1,j0,k0) == 0.0 .or.&
+                        & T_grid%mask(i0,j0+1,k0) == 0.0 .or.&
+                        & T_grid%mask(1,j0+1,k0) == 0.0) then
+                      Prof%flag(k) = .false.
+                   end if
+                else if ( i0 /= ieg .and. j0 == jeg ) then
+                   if ( T_grid%mask(i0,j0,k0) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0,k0) == 0.0) then
+                      Prof%flag(k) = .false.
+                   end if
+                else
+                   if ( T_grid%mask(i0,j0,k0) == 0.0 ) then
+                      Prof%flag(k) = .false.
+                   end if
+                end if
+   
+                if ( i0 /= ieg .and. j0 /= jeg) then
+                   if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0,k0+1) == 0.0 .or.&
+                        & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0+1,k0+1) == 0.0 ) then
+                      Prof%flag(k) = .false.
+                   end if
+                else if ( i0 == ieg .and. j0 /= jeg ) then
+                   if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+                        & T_grid%mask(1,j0,k0+1) == 0.0 .or.&
+                        & T_grid%mask(i0,j0+1,k0+1) == 0.0 .or.&
+                        & T_grid%mask(1,j0+1,k0+1) == 0.0) then
+                      Prof%flag(k) = .false.
+                   end if
+                else if ( i0 /= ieg .and. j0 == jeg ) then
+                   if ( T_grid%mask(i0,j0,k0+1) == 0.0 .or.&
+                        & T_grid%mask(i0+1,j0,k0+1) == 0.0) then
+                      Prof%flag(k) = .false.
+                   end if
+                else
+                   if ( T_grid%mask(i0,j0,k0+1) == 0.0 ) then
+                      Prof%flag(k) = .false.
+                   end if
+                end if
+   
+                if ( Prof%data(k) == MISSING_VALUE &
+                        .or. Prof%depth(k) == MISSING_VALUE ) then
+                   Prof%flag(k) = .false.
+                end if
+             end if ! flag
+          end if ! snz add
+       end do
+    end if ! determine vertical position and check mask at depth
+  end subroutine check_mask_depth_shelf
 
 end module ocean_da_core_mod
 
