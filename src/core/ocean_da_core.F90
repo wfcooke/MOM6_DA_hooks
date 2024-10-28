@@ -12,7 +12,7 @@ module ocean_da_core_mod
 
 
   USE fms2_io_mod, ONLY: ascii_read, get_dimension_size, get_dimension_size, get_variable_attribute
-  USE fms2_io_mod, ONLY: FmsNetcdfDomainFile_t
+  USE fms2_io_mod, ONLY: FmsNetcdfFile_t
   USE fms2_io_mod, ONLY: open_file, close_file, read_data, get_global_attribute
   USE fms2_io_mod, ONLY: get_num_variables, get_num_dimensions, variable_exists
 
@@ -284,7 +284,7 @@ contains
 
     character(len=32) :: fldname, axisname, time_units
 
-    type(FmsNetcdfDomainFile_t) :: fileobj
+    type(FmsNetcdfFile_t) :: fileobj
     type(time_type) :: obs_time, profile_time
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
@@ -333,7 +333,7 @@ contains
        var_id = obs_variable
     end if
 
-    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+    if ( open_file(fileobj, filename, "read", is_restart = .false.)) then 
        ndim= get_num_dimensions(fileobj)
        nvar= get_num_variables(fileobj)
        write (UNIT=stdout_unit, FMT='("Opened profile dataset: ",A)') trim(filename)
@@ -394,6 +394,7 @@ contains
 
        obs_time = get_cal_time(time, time_units, 'julian')
        profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
+       data_in_period = .false.
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -502,7 +503,6 @@ contains
        end if
        ! Now let us figure out if we are on the local core domain
        data_is_local = .false.
-       data_in_period = .false.
 
        if ( localize_data ) then
          call kd_search_nnearest(kdroot, lon, lat, &
@@ -646,7 +646,7 @@ contains
 
     character(len=32) :: fldname, axisname, time_units
 
-    type(FmsNetcdfDomainFile_t) :: fileobj
+    type(FmsNetcdfFile_t) :: fileobj
     type(time_type) :: obs_time, profile_time
 
     integer :: isc, iec, jsc, jec, isd, ied, jsd, jed
@@ -686,7 +686,7 @@ contains
        var_id = obs_variable
     end if
 
-    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+    if ( open_file(fileobj, filename, "read", is_restart = .false.)) then 
        ndim= get_num_dimensions(fileobj)
        nvar= get_num_variables(fileobj)
        write (UNIT=stdout_unit, FMT='("Opened argo dataset: ",A)') trim(filename)
@@ -747,6 +747,7 @@ contains
        ! If the profile time is out of model bounds, there is nothing to do.
        obs_time = get_cal_time(time, time_units, 'noleap')
        profile_time = increment_time(obs_time, sec_offset(inst_type),day_offset(inst_type))
+       data_in_period = .false.
        if ( profile_time >= time_start .and. profile_time <= time_end ) data_in_period = .true.
        if ( .not. data_in_period ) then
          station_count = station_count + 1
@@ -834,7 +835,6 @@ contains
        end if
 
        data_is_local = .false.
-       data_in_period = .false.
 
        if ( localize_data ) then
          call kd_search_nnearest(kdroot, lon, lat, &
@@ -972,7 +972,7 @@ contains
 
     character(len=32) :: fldname, axisname, time_units
 
-    type(FmsNetcdfDomainFile_t) :: fileobj
+    type(FmsNetcdfFile_t) :: fileobj
     type(time_type) :: surface_time, obs_time
 
     real, allocatable, dimension(:) :: lons, lats, times
@@ -1011,7 +1011,7 @@ contains
     inst_type = ODA_OISST
     var_id = obs_variable
 
-    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+    if ( open_file(fileobj, filename, "read", is_restart = .false.)) then 
        ndim= get_num_dimensions(fileobj)
        nvar= get_num_variables(fileobj)
        write (UNIT=stdout_unit, FMT='("Opened surface dataset: ",A)') trim(filename)
@@ -1193,7 +1193,7 @@ contains
 
     character(len=32) :: fldname, axisname, time_units
 
-    type(FmsNetcdfDomainFile_t) :: fileobj
+    type(FmsNetcdfFile_t) :: fileobj
     type(time_type) :: mooring_time, obs_time
     real,            allocatable, dimension(:) :: lon_axis, lat_axis, time_axis, depth_axis
 
@@ -1233,7 +1233,7 @@ contains
     inst_type = ODA_MRB
     var_id = obs_variable
 
-    if ( open_file(fileobj, filename, "read", Domain, is_restart = .false.)) then 
+    if ( open_file(fileobj, filename, "read",  is_restart = .false.)) then 
        ndim= get_num_dimensions(fileobj)
        nvar= get_num_variables(fileobj)
        write (UNIT=stdout_unit, FMT='("Opened mooring dataset: ",A)') trim(filename)
